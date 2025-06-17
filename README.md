@@ -127,6 +127,12 @@ echo "Hello world" | pb -k pb_abc123
 
 # Upload to custom domain
 pb file.txt -k pb_abc123 -h https://files.example.com
+
+# List all your uploaded files
+pb --list -k pb_abc123
+
+# Delete a file by URL
+pb --delete https://pb.nxh.ch/f/abc123def456 -k pb_abc123
 ```
 
 ## API Reference
@@ -155,6 +161,41 @@ GET /f/{fileId}
 ```
 
 Returns the original file with proper content-type headers.
+
+### Delete endpoint
+```http
+DELETE /f/{fileId}
+Authorization: Bearer pb_YOUR_API_KEY
+```
+
+Response:
+```json
+{
+  "fileId": "abc123def456",
+  "message": "File deleted successfully"
+}
+```
+
+### List files endpoint
+```http
+GET /list
+Authorization: Bearer pb_YOUR_API_KEY
+```
+
+Response:
+```json
+{
+  "files": [
+    {
+      "fileId": "abc123def456",
+      "originalName": "document.pdf",
+      "size": 1024,
+      "contentType": "application/pdf",
+      "uploadedAt": "2023-12-01T10:30:00.000Z",
+      "url": "https://pb.YOUR_SUBDOMAIN.workers.dev/f/abc123def456"
+    }
+  ]
+}
 
 ## Development
 

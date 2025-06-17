@@ -57,7 +57,8 @@ describe('CLI Tests', () => {
         apiKey: 'pb_test123',
         host: 'https://custom.com',
         delete: false,
-        deleteUrl: null
+        deleteUrl: null,
+        list: false
       });
     });
 
@@ -70,9 +71,10 @@ describe('CLI Tests', () => {
       expect(options).toEqual({
         file: null,
         apiKey: 'pb_test123',
-        host: 'https://pb.readingjourney.workers.dev',
+        host: 'https://pb.nxh.ch',
         delete: true,
-        deleteUrl: 'https://example.com/f/abc123'
+        deleteUrl: 'https://example.com/f/abc123',
+        list: false
       });
     });
 
@@ -105,6 +107,22 @@ describe('CLI Tests', () => {
       
       expect(() => parseArgs(args)).toThrow(); // Should exit
       expect(mockProcessExit).toHaveBeenCalledWith(0);
+    });
+
+    it('should parse list arguments correctly', async () => {
+      const { parseArgs } = await import('../cli/pb.js');
+      
+      const args = ['node', 'pb.js', '--list', '-k', 'pb_test123'];
+      const options = parseArgs(args);
+
+      expect(options).toEqual({
+        file: null,
+        apiKey: 'pb_test123',
+        host: 'https://pb.nxh.ch',
+        delete: false,
+        deleteUrl: null,
+        list: true
+      });
     });
   });
 
@@ -206,6 +224,77 @@ describe('CLI Tests', () => {
       
       await expect(uploadFile('test.txt', 'pb_test123', 'https://example.com'))
         .rejects.toThrow('No file provided');
+    });
+  });
+
+  describe('List Operations', () => {
+    it('should handle successful list request', async () => {
+      const mockResponse = {
+        statusCode: 200,
+        on: vi.fn((event, callback) => {
+          if (event === 'data') {
+            callback('{"files":[{"fileId":"abc123","originalName":"test.txt","size":12,"contentType":"text/plain","uploadedAt":"2023-12-01T10:30:00.000Z","url":"https://pb.nxh.ch/f/abc123"}]}');
+          } else if (event === 'end') {
+            callback();
+          }
+        })
+      };
+
+      const mockReq = {
+        on: vi.fn(),
+        end: vi.fn()
+      };
+
+      mockRequest.mockImplementation((options, callback) => {
+        expect(options.path).toBe('/list');
+        expect(options.method).toBe('GET');
+        expect(options.headers.Authorization).toBe('Bearer pb_test123');
+        callback(mockResponse);
+        return mockReq;
+      });
+
+      const { listFiles } = await import('../cli/pb.js');
+      
+      const result = await listFiles('pb_test123', 'https://example.com');
+      
+      expect(result).toEqual({
+        files: [{
+          fileId: 'abc123',
+          originalName: 'test.txt',
+          size: 12,
+          contentType: 'text/plain',
+          uploadedAt: '2023-12-01T10:30:00.000Z',
+          url: 'https://pb.nxh.ch/f/abc123'
+        }]
+      });
+    });
+
+    it('should handle list errors', async () => {
+      const mockResponse = {
+        statusCode: 401,
+        on: vi.fn((event, callback) => {
+          if (event === 'data') {
+            callback('{"error":"Invalid API key"}');
+          } else if (event === 'end') {
+            callback();
+          }
+        })
+      };
+
+      const mockReq = {
+        on: vi.fn(),
+        end: vi.fn()
+      };
+
+      mockRequest.mockImplementation((options, callback) => {
+        callback(mockResponse);
+        return mockReq;
+      });
+
+      const { listFiles } = await import('../cli/pb.js');
+      
+      await expect(listFiles('pb_invalid', 'https://example.com'))
+        .rejects.toThrow('Invalid API key');
     });
   });
 
@@ -440,6 +529,87 @@ describe('CLI Tests', () => {
       expect(mockConsoleError).toHaveBeenCalledWith('\\nError: File not found');
       expect(mockProcessExit).toHaveBeenCalledWith(1);
     });
+
+    it('should require API key for list', async () => {
+      process.argv = ['node', 'pb.js', '--list'];
+      delete process.env.PB_API_KEY;
+      
+      const { main } = await import('../cli/pb.js');
+      
+      await main();
+      
+      expect(mockConsoleError).toHaveBeenCalledWith(
+        'Error: No API key provided. Use -k option or set PB_API_KEY environment variable.'
+      );
+      expect(mockProcessExit).toHaveBeenCalledWith(1);
+    });
+
+    it('should handle successful list flow', async () => {
+      process.argv = ['node', 'pb.js', '--list'];
+      process.env.PB_API_KEY = 'pb_test123';
+      
+      const mockResponse = {
+        statusCode: 200,
+        on: vi.fn((event, callback) => {
+          if (event === 'data') {
+            callback('{"files":[{"fileId":"abc123","originalName":"test.txt","size":12,"contentType":"text/plain","uploadedAt":"2023-12-01T10:30:00.000Z","url":"https://pb.nxh.ch/f/abc123"}]}');
+          } else if (event === 'end') {
+            callback();
+          }
+        })
+      };
+
+      const mockReq = {
+        on: vi.fn(),
+        end: vi.fn()
+      };
+
+      mockRequest.mockImplementation((options, callback) => {
+        callback(mockResponse);
+        return mockReq;
+      });
+
+      const { main } = await import('../cli/pb.js');
+      
+      await main();
+      
+      expect(mockConsoleLog).toHaveBeenCalledWith('Fetching file list...');
+      expect(mockConsoleLog).toHaveBeenCalledWith('\\nFound 1 file(s):\\n');
+      expect(mockConsoleLog).toHaveBeenCalledWith('1. test.txt');
+    });
+
+    it('should handle empty list gracefully', async () => {
+      process.argv = ['node', 'pb.js', '--list'];
+      process.env.PB_API_KEY = 'pb_test123';
+      
+      const mockResponse = {
+        statusCode: 200,
+        on: vi.fn((event, callback) => {
+          if (event === 'data') {
+            callback('{"files":[]}');
+          } else if (event === 'end') {
+            callback();
+          }
+        })
+      };
+
+      const mockReq = {
+        on: vi.fn(),
+        end: vi.fn()
+      };
+
+      mockRequest.mockImplementation((options, callback) => {
+        callback(mockResponse);
+        return mockReq;
+      });
+
+      const { main } = await import('../cli/pb.js');
+      
+      await main();
+      
+      expect(mockConsoleLog).toHaveBeenCalledWith('Fetching file list...');
+      expect(mockConsoleLog).toHaveBeenCalledWith('\\nNo files found.');
+    });
   });
 
   describe('Host Configuration', () => {
@@ -449,7 +619,7 @@ describe('CLI Tests', () => {
       const args = ['node', 'pb.js', 'test.txt'];
       const options = parseArgs(args);
 
-      expect(options.host).toBe('https://pb.readingjourney.workers.dev');
+      expect(options.host).toBe('https://pb.nxh.ch');
     });
 
     it('should use custom host when specified', async () => {

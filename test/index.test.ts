@@ -19,10 +19,15 @@ vi.mock('../src/delete', () => ({
   handleDelete: vi.fn()
 }));
 
+vi.mock('../src/list', () => ({
+  handleList: vi.fn()
+}));
+
 import { validateApiKey } from '../src/auth';
 import { handleUpload } from '../src/upload';
 import { handleServe } from '../src/serve';
 import { handleDelete } from '../src/delete';
+import { handleList } from '../src/list';
 
 describe('Main Worker', () => {
   let env: ReturnType<typeof createMockEnv>;
@@ -166,6 +171,115 @@ describe('Main Worker', () => {
       expect(response.status).toBe(405);
       const text = await response.text();
       expect(text).toBe('Method not allowed');
+    });
+  });
+
+  describe('List endpoint', () => {
+    it('should require authorization header', async () => {
+      const request = new Request('https://example.com/list', {
+        method: 'GET'
+      });
+
+      const response = await worker.fetch(request, env as any, ctx);
+
+      expect(response.status).toBe(401);
+      const data = await response.json();
+      expect(data).toEqual({ error: 'Authorization required' });
+      expect(handleList).not.toHaveBeenCalled();
+    });
+
+    it('should validate Bearer token format', async () => {
+      const request = new Request('https://example.com/list', {
+        method: 'GET',
+        headers: {
+          'Authorization': 'InvalidFormat token123'
+        }
+      });
+
+      const response = await worker.fetch(request, env as any, ctx);
+
+      expect(response.status).toBe(401);
+      const data = await response.json();
+      expect(data).toEqual({ error: 'Authorization required' });
+      expect(handleList).not.toHaveBeenCalled();
+    });
+
+    it('should validate API key and handle list request', async () => {
+      const mockApiKey = {
+        id: 1,
+        key: 'pb_test123',
+        name: 'Test Key',
+        created_at: '2024-01-01',
+        last_used: null,
+        is_active: 1
+      };
+
+      vi.mocked(validateApiKey).mockResolvedValue(mockApiKey);
+
+      const mockListResponse = new Response(JSON.stringify({
+        files: [
+          {
+            fileId: 'abc123',
+            originalName: 'test.txt',
+            size: 12,
+            contentType: 'text/plain',
+            uploadedAt: '2023-12-01T10:30:00.000Z',
+            url: 'https://pb.nxh.ch/f/abc123'
+          }
+        ]
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' }
+      });
+
+      vi.mocked(handleList).mockResolvedValue(mockListResponse);
+
+      const request = new Request('https://example.com/list', {
+        method: 'GET',
+        headers: {
+          'Authorization': 'Bearer pb_test123'
+        }
+      });
+
+      const response = await worker.fetch(request, env as any, ctx);
+
+      expect(validateApiKey).toHaveBeenCalledWith(env.DB, 'pb_test123');
+      expect(handleList).toHaveBeenCalledWith(env.DB, mockApiKey);
+      expect(response).toBe(mockListResponse);
+    });
+
+    it('should reject invalid API keys', async () => {
+      vi.mocked(validateApiKey).mockResolvedValue(null);
+
+      const request = new Request('https://example.com/list', {
+        method: 'GET',
+        headers: {
+          'Authorization': 'Bearer invalid_key'
+        }
+      });
+
+      const response = await worker.fetch(request, env as any, ctx);
+
+      expect(response.status).toBe(403);
+      const data = await response.json();
+      expect(data).toEqual({ error: 'Invalid API key' });
+      expect(handleList).not.toHaveBeenCalled();
+    });
+
+    it('should only accept GET method for list endpoint', async () => {
+      const request = new Request('https://example.com/list', {
+        method: 'POST',
+        headers: {
+          'Authorization': 'Bearer pb_test123'
+        }
+      });
+
+      const response = await worker.fetch(request, env as any, ctx);
+
+      expect(response.status).toBe(200);
+      const text = await response.text();
+      expect(text).toBe('pb - Secure file upload service');
+      expect(handleList).not.toHaveBeenCalled();
     });
   });
 

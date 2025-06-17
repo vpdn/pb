@@ -63,11 +63,13 @@ function printUsage() {
   console.log(`
 Usage: pb <file> [options]
        pb --delete <url> [options]
+       pb --list [options]
 
 Options:
   -k, --key <api_key>    API key for authentication (or set PB_API_KEY env var)
   -h, --host <host>      Server host (default: ${DEFAULT_HOST})
   --delete               Delete a file by URL
+  --list                 List all files uploaded with your API key
   --help                 Show this help message
 
 Examples:
@@ -75,6 +77,7 @@ Examples:
   pb ./document.pdf -k pb_YOUR_API_KEY
   PB_API_KEY=pb_YOUR_API_KEY pb ./file.txt
   pb --delete https://pb.nxh.ch/f/abc123 -k pb_YOUR_API_KEY
+  pb --list -k pb_YOUR_API_KEY
 `);
 }
 
@@ -84,7 +87,8 @@ function parseArgs(args) {
     apiKey: process.env.PB_API_KEY,
     host: DEFAULT_HOST,
     delete: false,
-    deleteUrl: null
+    deleteUrl: null,
+    list: false
   };
 
   for (let i = 2; i < args.length; i++) {
@@ -100,7 +104,9 @@ function parseArgs(args) {
     } else if (arg === '--delete') {
       options.delete = true;
       options.deleteUrl = args[++i];
-    } else if (!options.file && !options.delete) {
+    } else if (arg === '--list') {
+      options.list = true;
+    } else if (!options.file && !options.delete && !options.list) {
       options.file = arg;
     }
   }
@@ -245,10 +251,90 @@ async function deleteFile(url, apiKey) {
   }
 }
 
+async function listFiles(apiKey, host) {
+  const url = new URL('/list', host);
+  
+  return new Promise((resolve, reject) => {
+    const options = {
+      hostname: url.hostname,
+      port: url.port || (url.protocol === 'https:' ? 443 : 80),
+      path: url.pathname,
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`
+      }
+    };
+
+    const protocol = url.protocol === 'https:' ? https : require('http');
+    
+    const req = protocol.request(options, (res) => {
+      let data = '';
+      
+      res.on('data', (chunk) => {
+        data += chunk;
+      });
+      
+      res.on('end', () => {
+        if (res.statusCode === 200) {
+          try {
+            const result = JSON.parse(data);
+            resolve(result);
+          } catch (e) {
+            reject(new Error('Invalid response from server'));
+          }
+        } else {
+          try {
+            const error = JSON.parse(data);
+            reject(new Error(error.error || `List failed: ${res.statusCode}`));
+          } catch (e) {
+            reject(new Error(`List failed: ${res.statusCode}`));
+          }
+        }
+      });
+    });
+
+    req.on('error', reject);
+    req.end();
+  });
+}
+
 async function main() {
   const options = parseArgs(process.argv);
 
-  if (options.delete) {
+  if (options.list) {
+    if (!options.apiKey) {
+      console.error('Error: No API key provided. Use -k option or set PB_API_KEY environment variable.');
+      process.exit(1);
+    }
+
+    try {
+      console.log('Fetching file list...');
+      const result = await listFiles(options.apiKey, options.host);
+      
+      if (result.files.length === 0) {
+        console.log('\\nNo files found.');
+        return;
+      }
+
+      console.log(`\\nFound ${result.files.length} file(s):\\n`);
+      
+      result.files.forEach((file, index) => {
+        const uploadDate = new Date(file.uploadedAt).toLocaleString();
+        const sizeKB = Math.round(file.size / 1024 * 100) / 100;
+        
+        console.log(`${index + 1}. ${file.originalName}`);
+        console.log(`   URL: ${file.url}`);
+        console.log(`   Size: ${sizeKB} KB (${file.size} bytes)`);
+        console.log(`   Type: ${file.contentType || 'unknown'}`);
+        console.log(`   Uploaded: ${uploadDate}`);
+        console.log(`   File ID: ${file.fileId}`);
+        console.log('');
+      });
+    } catch (error) {
+      console.error(`\\nError: ${error.message}`);
+      process.exit(1);
+    }
+  } else if (options.delete) {
     if (!options.deleteUrl) {
       console.error('Error: No URL specified for deletion');
       printUsage();

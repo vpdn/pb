@@ -97,12 +97,22 @@ describe('End-to-End Tests - Complete File Lifecycle', () => {
       expect(user1RetrieveResponse.status).toBe(200);
 
       // User 1 tries to delete User 2's file (should fail)
-      env.DB._setMockResult('first', apiKey1); // Validate User 1's key
-      
-      // Mock database query for User 2's file with User 1's API key (should return null)
+      // Mock two different database queries:
+      // 1. API key validation (should succeed for user1)
+      // 2. File lookup (should fail - user1 doesn't own user2's file)
+      let queryCount = 0;
       const mockPrepare = vi.fn().mockReturnValue({
         bind: vi.fn().mockReturnThis(),
-        first: vi.fn().mockResolvedValue(null), // No file found for this API key
+        first: vi.fn().mockImplementation(async () => {
+          queryCount++;
+          if (queryCount === 1) {
+            // First query: API key validation - return valid key for user1
+            return apiKey1;
+          } else {
+            // Second query: File lookup - return null (user1 doesn't own user2's file)
+            return null;
+          }
+        }),
         run: vi.fn(),
         all: vi.fn()
       });
@@ -120,17 +130,27 @@ describe('End-to-End Tests - Complete File Lifecycle', () => {
       expect(unauthorizedDeleteData).toEqual({ error: 'File not found or access denied' });
 
       // User 2 successfully deletes their own file
-      env.DB._setMockResult('first', apiKey2); // Validate User 2's key
-      
-      // Mock successful lookup for User 2's file
+      // Mock two different database queries:
+      // 1. API key validation (should succeed for user2)
+      // 2. File lookup (should succeed - user2 owns the file)
+      let queryCount2 = 0;
       const mockPrepareSuccess = vi.fn().mockReturnValue({
         bind: vi.fn().mockReturnThis(),
-        first: vi.fn().mockResolvedValue({
-          file_id: user2FileId,
-          original_name: 'user2-document.txt',
-          content_type: 'text/plain',
-          size: 'User 2 private content'.length,
-          api_key_id: 2
+        first: vi.fn().mockImplementation(async () => {
+          queryCount2++;
+          if (queryCount2 === 1) {
+            // First query: API key validation - return valid key for user2
+            return apiKey2;
+          } else {
+            // Second query: File lookup - return the file (user2 owns it)
+            return {
+              file_id: user2FileId,
+              original_name: 'user2-document.txt',
+              content_type: 'text/plain',
+              size: 'User 2 private content'.length,
+              api_key_id: 2
+            };
+          }
         }),
         run: vi.fn().mockResolvedValue({ success: true }),
         all: vi.fn()
@@ -217,6 +237,9 @@ describe('End-to-End Tests - Complete File Lifecycle', () => {
       const deleteOldResponse = await worker.fetch(deleteOldRequest, env as any, ctx);
       expect(deleteOldResponse.status).toBe(200);
 
+      // Reset the database mock to use the standard mock behavior
+      env.DB.prepare = vi.fn(() => env.DB._getMockStatement());
+      
       // Verify new version is still accessible
       env.DB._setMockResult('first', {
         file_id: replacementFileId,

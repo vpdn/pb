@@ -2,6 +2,7 @@ import { validateApiKey } from './auth';
 import { handleUpload } from './upload';
 import { handleServe } from './serve';
 import { handleDelete } from './delete';
+import { handleList } from './list';
 
 export interface Env {
   DB: D1Database;
@@ -89,6 +90,29 @@ export default {
       // Use custom domain if available, otherwise use request origin
       const baseUrl = url.hostname.includes('workers.dev') ? 'https://pb.nxh.ch' : url.origin;
       return handleUpload(request, env.DB, env.R2_BUCKET, validKey, baseUrl);
+    }
+
+    // Handle list files
+    if (url.pathname === '/list' && request.method === 'GET') {
+      const authHeader = request.headers.get('Authorization');
+      if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        return new Response(JSON.stringify({ error: 'Authorization required' }), {
+          status: 401,
+          headers: { 'Content-Type': 'application/json', ...corsHeaders }
+        });
+      }
+
+      const apiKey = authHeader.substring(7);
+      const validKey = await validateApiKey(env.DB, apiKey);
+      
+      if (!validKey) {
+        return new Response(JSON.stringify({ error: 'Invalid API key' }), {
+          status: 403,
+          headers: { 'Content-Type': 'application/json', ...corsHeaders }
+        });
+      }
+
+      return handleList(env.DB, validKey);
     }
 
     // Default response
