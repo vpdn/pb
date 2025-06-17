@@ -1,5 +1,5 @@
 {
-	"name": "pbweb",
+	"name": "pb",
 	"version": "0.0.0",
 	"private": true,
 	"scripts": {
@@ -7,10 +7,18 @@
 		"dev": "wrangler dev",
 		"start": "wrangler dev",
 		"test": "vitest",
-		"cf-typegen": "wrangler types"
+		"cf-typegen": "wrangler types",
+		"db:init": "wrangler d1 execute pb-db --file=./schema.sql"
+	},
+	"bin": {
+		"pb": "./cli/pb.js"
+	},
+	"dependencies": {
+		"nanoid": "^5.0.4"
 	},
 	"devDependencies": {
 		"@cloudflare/vitest-pool-workers": "^0.8.19",
+		"@cloudflare/workers-types": "^4.20231218.0",
 		"typescript": "^5.5.2",
 		"vitest": "~3.2.0",
 		"wrangler": "^4.20.0"
