@@ -170,3 +170,17 @@ dist
 
 .dev.vars
 .wrangler/
+
+# macOS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+
+# Windows
+Desktop.ini
+$RECYCLE.BIN/
+
+# Linux
+*~

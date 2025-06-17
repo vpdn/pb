@@ -180,14 +180,6 @@ npm run cf-typegen
 - **D1**: SQLite database for metadata and API keys
 - **Global**: Deployed on Cloudflare's global network
 
-## Security & Considerations
-
-- ✅ API key authentication required for uploads
-- ✅ Files are publicly accessible once uploaded
-- ✅ API key usage is tracked
-- ⚠️ No file expiration (files persist indefinitely)
-- ⚠️ No file size limits beyond Cloudflare's 100MB limit
-- ⚠️ No content scanning or filtering
 
 ## License
 
