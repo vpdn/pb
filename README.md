@@ -91,24 +91,24 @@ This creates a key like `pb_1234567890abcdef` and adds it to your database.
 **Option 1: Install the CLI globally**
 ```bash
 npm link
-pb ./myfile.pdf -k pb_YOUR_API_KEY
+pb ./myfile.pdf -key PB_API_KEY
 ```
 
 **Option 2: Use npx (no installation needed)**
 ```bash
-npx ./cli/pb.js ./myfile.pdf -k pb_YOUR_API_KEY
+npx ./cli/pb.js ./myfile.pdf -key PB_API_KEY
 ```
 
 **Option 3: Use environment variable**
 ```bash
-export PB_API_KEY=pb_YOUR_API_KEY
+export PB_API_KEY=PB_API_KEY
 npx ./cli/pb.js ./myfile.pdf
 ```
 
 **Option 4: Use curl directly**
 ```bash
 curl -X POST \
-  -H "Authorization: Bearer pb_YOUR_API_KEY" \
+  -H "Authorization: Bearer PB_API_KEY" \
   -F "file=@./myfile.pdf" \
   https://pb.YOUR_SUBDOMAIN.workers.dev/upload
 ```
@@ -117,22 +117,22 @@ curl -X POST \
 
 ```bash
 # Upload an image
-pb screenshot.png -k pb_abc123
+pb screenshot.png -key pb_abc123
 
 # Upload with custom filename
-pb ./report.pdf -k pb_abc123
+pb ./report.pdf -key pb_abc123
 
 # Pipe content
-echo "Hello world" | pb -k pb_abc123
+echo "Hello world" | pb -key pb_abc123
 
 # Upload to custom domain
-pb file.txt -k pb_abc123 -h https://files.example.com
+pb file.txt -key pb_abc123 -h https://files.example.com
 
 # List all your uploaded files
-pb --list -k pb_abc123
+pb --list -key pb_abc123
 
 # Delete a file by URL
-pb --delete https://pb.nxh.ch/f/abc123def456 -k pb_abc123
+pb --delete https://pb.nxh.ch/f/abc123def456 -key pb_abc123
 ```
 
 ## API Reference
@@ -140,7 +140,7 @@ pb --delete https://pb.nxh.ch/f/abc123def456 -k pb_abc123
 ### Upload endpoint
 ```http
 POST /upload
-Authorization: Bearer pb_YOUR_API_KEY
+Authorization: Bearer PB_API_KEY
 Content-Type: multipart/form-data
 
 {file: binary data}
@@ -165,7 +165,7 @@ Returns the original file with proper content-type headers.
 ### Delete endpoint
 ```http
 DELETE /f/{fileId}
-Authorization: Bearer pb_YOUR_API_KEY
+Authorization: Bearer PB_API_KEY
 ```
 
 Response:
@@ -179,7 +179,7 @@ Response:
 ### List files endpoint
 ```http
 GET /list
-Authorization: Bearer pb_YOUR_API_KEY
+Authorization: Bearer PB_API_KEY
 ```
 
 Response:

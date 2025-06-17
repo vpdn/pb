@@ -66,7 +66,7 @@ Usage: pb <file> [options]
        pb --list [options]
 
 Options:
-  -k, --key <api_key>    API key for authentication (or set PB_API_KEY env var)
+  -key <api_key>         API key for authentication (or set PB_API_KEY env var)
   -h, --host <host>      Server host (default: ${DEFAULT_HOST})
   --delete               Delete a file by URL
   --list                 List all files uploaded with your API key
@@ -74,10 +74,10 @@ Options:
 
 Examples:
   pb ./image.png
-  pb ./document.pdf -k pb_YOUR_API_KEY
-  PB_API_KEY=pb_YOUR_API_KEY pb ./file.txt
-  pb --delete https://pb.nxh.ch/f/abc123 -k pb_YOUR_API_KEY
-  pb --list -k pb_YOUR_API_KEY
+  pb ./document.pdf -key PB_API_KEY
+  PB_API_KEY=PB_API_KEY pb ./file.txt
+  pb --delete https://pb.nxh.ch/f/abc123 -key PB_API_KEY
+  pb --list -key PB_API_KEY
 `);
 }
 
@@ -97,7 +97,7 @@ function parseArgs(args) {
     if (arg === '--help') {
       printUsage();
       process.exit(0);
-    } else if (arg === '-k' || arg === '--key') {
+    } else if (arg === '-key') {
       options.apiKey = args[++i];
     } else if (arg === '-h' || arg === '--host') {
       options.host = args[++i];
@@ -303,7 +303,7 @@ async function main() {
 
   if (options.list) {
     if (!options.apiKey) {
-      console.error('Error: No API key provided. Use -k option or set PB_API_KEY environment variable.');
+      console.error('Error: No API key provided. Use -key option or set PB_API_KEY environment variable.');
       process.exit(1);
     }
 
@@ -342,7 +342,7 @@ async function main() {
     }
 
     if (!options.apiKey) {
-      console.error('Error: No API key provided. Use -k option or set PB_API_KEY environment variable.');
+      console.error('Error: No API key provided. Use -key option or set PB_API_KEY environment variable.');
       process.exit(1);
     }
 
@@ -363,7 +363,7 @@ async function main() {
     }
 
     if (!options.apiKey) {
-      console.error('Error: No API key provided. Use -k option or set PB_API_KEY environment variable.');
+      console.error('Error: No API key provided. Use -key option or set PB_API_KEY environment variable.');
       process.exit(1);
     }
 
