@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const https = require('https');
 const { URL } = require('url');
+const { Table } = require('console-table-printer');
 
 const DEFAULT_HOST = 'https://pb.nxh.ch';
 
@@ -318,18 +319,69 @@ async function main() {
 
       console.log(`\\nFound ${result.files.length} file(s):\\n`);
       
-      result.files.forEach((file, index) => {
-        const uploadDate = new Date(file.uploadedAt).toLocaleString();
-        const sizeKB = Math.round(file.size / 1024 * 100) / 100;
-        
-        console.log(`${index + 1}. ${file.originalName}`);
-        console.log(`   URL: ${file.url}`);
-        console.log(`   Size: ${sizeKB} KB (${file.size} bytes)`);
-        console.log(`   Type: ${file.contentType || 'unknown'}`);
-        console.log(`   Uploaded: ${uploadDate}`);
-        console.log(`   File ID: ${file.fileId}`);
-        console.log('');
+      // Create table with console-table-printer
+      const table = new Table({
+        columns: [
+          { name: '#', alignment: 'right' },
+          { name: 'File Name', alignment: 'left' },
+          { name: 'URL', alignment: 'left' },
+          { name: 'Size', alignment: 'right' },
+          { name: 'Type', alignment: 'left' },
+          { name: 'Uploaded', alignment: 'right' }
+        ]
       });
+      
+      result.files.forEach((file, index) => {
+        const date = new Date(file.uploadedAt);
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        const hours = String(date.getHours()).padStart(2, '0');
+        const minutes = String(date.getMinutes()).padStart(2, '0');
+        const seconds = String(date.getSeconds()).padStart(2, '0');
+        const uploadDate = `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+        
+        // Format size with exactly 3 digits
+        let sizeStr;
+        const bytes = file.size;
+        const kb = bytes / 1024;
+        const mb = bytes / (1024 * 1024);
+        const gb = bytes / (1024 * 1024 * 1024);
+        
+        if (kb < 1) {
+          // Show small bytes as KB with 2 decimals
+          sizeStr = `${kb.toFixed(2)} KB`;
+        } else if (kb < 10) {
+          sizeStr = `${kb.toFixed(2)} KB`;
+        } else if (kb < 100) {
+          sizeStr = `${kb.toFixed(1)} KB`;
+        } else if (kb < 1000) {
+          sizeStr = `${Math.round(kb)} KB`;
+        } else if (mb < 10) {
+          sizeStr = `${mb.toFixed(2)} MB`;
+        } else if (mb < 100) {
+          sizeStr = `${mb.toFixed(1)} MB`;
+        } else if (mb < 1000) {
+          sizeStr = `${Math.round(mb)} MB`;
+        } else if (gb < 10) {
+          sizeStr = `${gb.toFixed(2)} GB`;
+        } else if (gb < 100) {
+          sizeStr = `${gb.toFixed(1)} GB`;
+        } else {
+          sizeStr = `${Math.round(gb)} GB`;
+        }
+        
+        table.addRow({
+          '#': index + 1,
+          'File Name': file.originalName,
+          'URL': file.url,
+          'Size': sizeStr,
+          'Type': file.contentType || 'unknown',
+          'Uploaded': uploadDate
+        });
+      });
+      
+      table.printTable();
     } catch (error) {
       console.error(`\\nError: ${error.message}`);
       process.exit(1);
