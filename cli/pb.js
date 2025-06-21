@@ -60,6 +60,23 @@ function getContentType(fileName) {
   return mimeTypes[ext] || 'application/octet-stream';
 }
 
+function formatBytes(bytes) {
+  if (bytes === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
+function createProgressBar(current, total, width = 30) {
+  const percentage = Math.round((current / total) * 100);
+  const filled = Math.round((current / total) * width);
+  const empty = width - filled;
+  
+  const bar = '█'.repeat(filled) + '░'.repeat(empty);
+  return `[${bar}] ${percentage}% ${formatBytes(current)}/${formatBytes(total)}`;
+}
+
 function printUsage() {
   console.log(`
 Usage: pb <file> [options]
@@ -158,6 +175,9 @@ async function uploadFile(filePath, apiKey, host) {
 
     const protocol = url.protocol === 'https:' ? https : require('http');
     
+    // Show file size only for larger files
+    const showProgress = formData.length > 1024 * 1024; // Show progress for files > 1MB
+    
     const req = protocol.request(options, (res) => {
       let data = '';
       
@@ -166,6 +186,11 @@ async function uploadFile(filePath, apiKey, host) {
       });
       
       res.on('end', () => {
+        // Clear progress line if it was shown
+        if (showProgress) {
+          process.stdout.write('\x1b[2K\r');
+        }
+        
         if (res.statusCode === 200) {
           try {
             const result = JSON.parse(data);
@@ -185,8 +210,45 @@ async function uploadFile(filePath, apiKey, host) {
     });
 
     req.on('error', reject);
-    req.write(formData);
-    req.end();
+    
+    if (showProgress) {
+      // Write data in chunks to show progress
+      const chunkSize = 65536; // 64KB chunks
+      let offset = 0;
+      let uploadedBytes = 0;
+      const totalBytes = formData.length;
+      
+      // Show initial progress
+      process.stdout.write(`Uploading: ${createProgressBar(0, totalBytes)}\r`);
+      
+      function writeNextChunk() {
+        if (offset >= formData.length) {
+          req.end();
+          return;
+        }
+        
+        const chunk = formData.slice(offset, Math.min(offset + chunkSize, formData.length));
+        const canContinue = req.write(chunk);
+        
+        offset += chunk.length;
+        uploadedBytes = offset;
+        
+        // Update progress bar
+        process.stdout.write(`Uploading: ${createProgressBar(uploadedBytes, totalBytes)}\r`);
+        
+        if (canContinue) {
+          setImmediate(writeNextChunk);
+        } else {
+          req.once('drain', writeNextChunk);
+        }
+      }
+      
+      writeNextChunk();
+    } else {
+      // For small files, just write at once
+      req.write(formData);
+      req.end();
+    }
   });
 }
 

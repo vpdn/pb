@@ -2,6 +2,8 @@
 
 A lightweight, serverless file upload and sharing service built on Cloudflare Workers. Upload files securely and share them with permanent URLs.
 
+![pb upload demo](./pb_upload.svg)
+
 ## What is pb?
 
 pb is a modern pastebin-like service for files. It provides:
@@ -22,205 +24,139 @@ pb is a modern pastebin-like service for files. It provides:
 
 ## Quick Start
 
-Want to run your own pb instance? Follow these steps:
+Want to run your own pb instance? 
 
 ### Prerequisites
 
-- [Node.js](https://nodejs.org/) 18+
+- [Node.js](https://nodejs.org/) version 16 or higher
 - [Cloudflare account](https://cloudflare.com) (free tier works)
-- [Wrangler CLI](https://developers.cloudflare.com/workers/wrangler/) installed globally
+- [Wrangler CLI](https://developers.cloudflare.com/workers/wrangler/) - Install with: `npm install -g wrangler`
 
 ### Installation
 
+#### Automated Setup (Recommended)
+
+If you're using an AI assistant (like Claude, ChatGPT, or Cursor), you can have it automatically set up pb for you:
+
+**Just point your AI assistant to this file: [INSTALL.md](./INSTALL.md)**
+
+The installation guide contains step-by-step commands that AI assistants can execute on your behalf, making the setup process completely hands-free.
+
+#### Manual Setup
+
+If you prefer to set it up yourself:
+
 1. **Clone and setup**
    ```bash
-   git clone <your-repo-url>
+   git clone https://github.com/vpdn/pb.git
    cd pb
    npm install
    ```
 
-2. **Create Cloudflare resources**
+2. **Login to Cloudflare**
    ```bash
-   # Create D1 database for metadata
-   npx wrangler d1 create pb-db
-   
-   # Create R2 bucket for file storage
-   npx wrangler r2 bucket create pb-files
+   npx wrangler login
    ```
 
-3. **Configure the service**
-   
-   Update `wrangler.jsonc` with your database ID from step 2:
-   ```json
-   "d1_databases": [
-     {
-       "binding": "DB", 
-       "database_name": "pb-db",
-       "database_id": "YOUR_DATABASE_ID_HERE"
-     }
-   ]
-   ```
-
-4. **Initialize the database**
+3. **Create KV namespace**
    ```bash
-   npm run db:init
+   npx wrangler kv namespace create "FILES"
    ```
+   
+   Copy the output and update `wrangler.toml` with your KV namespace ID.
 
-5. **Deploy to Cloudflare**
+4. **Deploy to Cloudflare**
    ```bash
    npm run deploy
    ```
 
 That's it! Your pb service is now running on `https://pb.YOUR_SUBDOMAIN.workers.dev`
 
-## Using pb
+## Installation
 
-### Create an API key
-
-Generate an API key to authenticate uploads:
+### Install the CLI
 
 ```bash
-# Generate a secure API key  
-node scripts/generate-api-key.js "My API Key"
+npm install -g @vpdn/pb-sharelink
 ```
 
-This creates a key like `pb_1234567890abcdef` and adds it to your database.
+## Using pb
+
+### API Key Setup
+
+Access to pb is controlled through API keys. Each key can upload, list, and delete its own files.
+
+1. **Generate an API key**
+   ```bash
+   node scripts/generate-api-key.js "My API Key"
+   ```
+   This creates a key like `pb_1234567890abcdef`
+
+2. **Deploy the key to Cloudflare**
+   ```bash
+   npm run deploy
+   ```
+   This publishes your API key to the Worker's KV store
+
+3. **Configure your shell** (Recommended)
+   
+   Add to your shell configuration file (~/.bashrc, ~/.bash_profile, or ~/.zshrc):
+   ```bash
+   export PB_API_KEY="pb_1234567890abcdef"
+   ```
+   
+   Then reload your shell:
+   ```bash
+   source ~/.bashrc  # or source ~/.zshrc
+   ```
 
 ### Upload files
 
-**Option 1: Install the CLI globally**
+Once you've installed the CLI and configured PB_API_KEY:
+
 ```bash
-npm link
-pb ./myfile.pdf -key PB_API_KEY
+# Upload any file
+pb myfile.pdf
+# Returns: https://pb.YOUR_SUBDOMAIN.workers.dev/f/abc123def456
+
+# Upload from pipe
+echo "Hello world" | pb
+
+# Upload with custom name
+cat data.json | pb -n "backup.json"
 ```
 
-**Option 2: Use npx (no installation needed)**
-```bash
-npx ./cli/pb.js ./myfile.pdf -key PB_API_KEY
-```
+**Alternative methods:**
 
-**Option 3: Use environment variable**
 ```bash
-export PB_API_KEY=PB_API_KEY
-npx ./cli/pb.js ./myfile.pdf
-```
+# If you haven't set PB_API_KEY
+pb myfile.pdf -key pb_1234567890abcdef
 
-**Option 4: Use curl directly**
-```bash
+# Use curl directly
 curl -X POST \
-  -H "Authorization: Bearer PB_API_KEY" \
+  -H "Authorization: Bearer pb_1234567890abcdef" \
   -F "file=@./myfile.pdf" \
   https://pb.YOUR_SUBDOMAIN.workers.dev/upload
 ```
 
-### Examples
+### Common Operations
 
 ```bash
-# Upload an image
-pb screenshot.png -key pb_abc123
+# Upload files (with PB_API_KEY configured)
+pb screenshot.png
+pb document.pdf
+cat config.json | pb
 
-# Upload with custom filename
-pb ./report.pdf -key pb_abc123
+# List all your files
+pb list
 
-# Pipe content
-echo "Hello world" | pb -key pb_abc123
-
-# Upload to custom domain
-pb file.txt -key pb_abc123 -h https://files.example.com
-
-# List all your uploaded files
-pb --list -key pb_abc123
-
-# Delete a file by URL
-pb --delete https://pb.nxh.ch/f/abc123def456 -key pb_abc123
+# Delete a file
+pb delete https://pb.YOUR_SUBDOMAIN.workers.dev/f/abc123def456
 ```
 
 ## API Reference
 
-### Upload endpoint
-```http
-POST /upload
-Authorization: Bearer PB_API_KEY
-Content-Type: multipart/form-data
-
-{file: binary data}
-```
-
-Response:
-```json
-{
-  "url": "https://pb.YOUR_SUBDOMAIN.workers.dev/f/abc123def456", 
-  "fileId": "abc123def456",
-  "size": 1024
-}
-```
-
-### Download endpoint  
-```http
-GET /f/{fileId}
-```
-
-Returns the original file with proper content-type headers.
-
-### Delete endpoint
-```http
-DELETE /f/{fileId}
-Authorization: Bearer PB_API_KEY
-```
-
-Response:
-```json
-{
-  "fileId": "abc123def456",
-  "message": "File deleted successfully"
-}
-```
-
-### List files endpoint
-```http
-GET /list
-Authorization: Bearer PB_API_KEY
-```
-
-Response:
-```json
-{
-  "files": [
-    {
-      "fileId": "abc123def456",
-      "originalName": "document.pdf",
-      "size": 1024,
-      "contentType": "application/pdf",
-      "uploadedAt": "2023-12-01T10:30:00.000Z",
-      "url": "https://pb.YOUR_SUBDOMAIN.workers.dev/f/abc123def456"
-    }
-  ]
-}
-
-## Development
-
-**Local development**
-```bash
-npm run dev
-```
-
-**Run tests**
-```bash
-npm test
-```
-
-**Type checking**
-```bash
-npm run cf-typegen
-```
-
-## Architecture
-
-- **Workers**: Serverless functions handling uploads/downloads
-- **R2**: Object storage for files (S3-compatible)
-- **D1**: SQLite database for metadata and API keys
-- **Global**: Deployed on Cloudflare's global network
-
+See [API.md](./API.md) for detailed API documentation.
 
 ## License
 
