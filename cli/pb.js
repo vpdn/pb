@@ -68,6 +68,30 @@ function formatBytes(bytes) {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
 
+function parseDuration(duration) {
+  if (!duration) return null;
+  
+  const regex = /^(\d+)([mhdw])$/;
+  const match = duration.toLowerCase().match(regex);
+  
+  if (!match) {
+    throw new Error('Invalid duration format. Use formats like: 30m, 24h, 7d, 1w');
+  }
+  
+  const value = parseInt(match[1]);
+  const unit = match[2];
+  
+  let milliseconds;
+  switch (unit) {
+    case 'm': milliseconds = value * 60 * 1000; break;
+    case 'h': milliseconds = value * 60 * 60 * 1000; break;
+    case 'd': milliseconds = value * 24 * 60 * 60 * 1000; break;
+    case 'w': milliseconds = value * 7 * 24 * 60 * 60 * 1000; break;
+  }
+  
+  return new Date(Date.now() + milliseconds).toISOString();
+}
+
 function createProgressBar(current, total, width = 30) {
   const percentage = Math.round((current / total) * 100);
   const filled = Math.round((current / total) * width);
@@ -88,6 +112,8 @@ Options:
   -h, --host <host>      Server host (default: ${DEFAULT_HOST})
   --delete               Delete a file by URL
   --list                 List all files uploaded with your API key
+  --json                 Output results in JSON format
+  --expiresAfter <time>  Set file expiration (e.g., 30m, 24h, 7d, 1w)
   --help                 Show this help message
 
 Examples:
@@ -96,6 +122,9 @@ Examples:
   PB_API_KEY=PB_API_KEY pb ./file.txt
   pb --delete https://pb.nxh.ch/f/abc123 -key PB_API_KEY
   pb --list -key PB_API_KEY
+  pb --list --json -key PB_API_KEY
+  pb ./file.txt --json -key PB_API_KEY
+  pb ./temp.txt --expiresAfter 24h -key PB_API_KEY
 `);
 }
 
@@ -106,7 +135,9 @@ function parseArgs(args) {
     host: DEFAULT_HOST,
     delete: false,
     deleteUrl: null,
-    list: false
+    list: false,
+    json: false,
+    expiresAfter: null
   };
 
   for (let i = 2; i < args.length; i++) {
@@ -124,6 +155,10 @@ function parseArgs(args) {
       options.deleteUrl = args[++i];
     } else if (arg === '--list') {
       options.list = true;
+    } else if (arg === '--json') {
+      options.json = true;
+    } else if (arg === '--expiresAfter') {
+      options.expiresAfter = args[++i];
     } else if (!options.file && !options.delete && !options.list) {
       options.file = arg;
     }
@@ -132,7 +167,7 @@ function parseArgs(args) {
   return options;
 }
 
-async function uploadFile(filePath, apiKey, host) {
+async function uploadFile(filePath, apiKey, host, expiresAt = null) {
   if (!fs.existsSync(filePath)) {
     throw new Error(`File not found: ${filePath}`);
   }
@@ -150,13 +185,26 @@ async function uploadFile(filePath, apiKey, host) {
   
   // Create form data manually
   const boundary = '----FormBoundary' + Math.random().toString(36).substr(2);
-  const formData = Buffer.concat([
+  const formDataParts = [
     Buffer.from(`--${boundary}\r\n`),
     Buffer.from(`Content-Disposition: form-data; name="file"; filename="${fileName}"\r\n`),
     Buffer.from(`Content-Type: ${contentType}\r\n\r\n`),
     fileBuffer,
-    Buffer.from(`\r\n--${boundary}--\r\n`)
-  ]);
+    Buffer.from(`\r\n`)
+  ];
+  
+  // Add expiration field if provided
+  if (expiresAt) {
+    formDataParts.push(
+      Buffer.from(`--${boundary}\r\n`),
+      Buffer.from(`Content-Disposition: form-data; name="expires_at"\r\n\r\n`),
+      Buffer.from(expiresAt),
+      Buffer.from(`\r\n`)
+    );
+  }
+  
+  formDataParts.push(Buffer.from(`--${boundary}--\r\n`));
+  const formData = Buffer.concat(formDataParts);
 
   const url = new URL('/upload', host);
   
@@ -366,13 +414,24 @@ async function main() {
 
   if (options.list) {
     if (!options.apiKey) {
-      console.error('Error: No API key provided. Use -key option or set PB_API_KEY environment variable.');
+      if (options.json) {
+        console.log(JSON.stringify({ error: 'No API key provided. Use -key option or set PB_API_KEY environment variable.' }));
+      } else {
+        console.error('Error: No API key provided. Use -key option or set PB_API_KEY environment variable.');
+      }
       process.exit(1);
     }
 
     try {
-      console.log('Fetching file list...');
+      if (!options.json) {
+        console.log('Fetching file list...');
+      }
       const result = await listFiles(options.apiKey, options.host);
+      
+      if (options.json) {
+        console.log(JSON.stringify(result));
+        return;
+      }
       
       if (result.files.length === 0) {
         console.log('\\nNo files found.');
@@ -382,16 +441,22 @@ async function main() {
       console.log(`\\nFound ${result.files.length} file(s):\\n`);
       
       // Create table with console-table-printer
-      const table = new Table({
-        columns: [
-          { name: '#', alignment: 'right' },
-          { name: 'File Name', alignment: 'left' },
-          { name: 'URL', alignment: 'left' },
-          { name: 'Size', alignment: 'right' },
-          { name: 'Type', alignment: 'left' },
-          { name: 'Uploaded', alignment: 'right' }
-        ]
-      });
+      const columns = [
+        { name: '#', alignment: 'right' },
+        { name: 'File Name', alignment: 'left' },
+        { name: 'URL', alignment: 'left' },
+        { name: 'Size', alignment: 'right' },
+        { name: 'Type', alignment: 'left' },
+        { name: 'Uploaded', alignment: 'right' }
+      ];
+      
+      // Add expiration column if any file has expiration
+      const hasExpiration = result.files.some(file => file.expiresAt);
+      if (hasExpiration) {
+        columns.push({ name: 'Expires', alignment: 'right' });
+      }
+      
+      const table = new Table({ columns });
       
       result.files.forEach((file, index) => {
         const date = new Date(file.uploadedAt);
@@ -433,63 +498,126 @@ async function main() {
           sizeStr = `${Math.round(gb)} GB`;
         }
         
-        table.addRow({
+        const row = {
           '#': index + 1,
           'File Name': file.originalName,
           'URL': file.url,
           'Size': sizeStr,
           'Type': file.contentType || 'unknown',
           'Uploaded': uploadDate
-        });
+        };
+        
+        if (hasExpiration) {
+          row['Expires'] = file.remainingTime || '-';
+        }
+        
+        table.addRow(row);
       });
       
       table.printTable();
     } catch (error) {
-      console.error(`\\nError: ${error.message}`);
+      if (options.json) {
+        console.log(JSON.stringify({ error: error.message }));
+      } else {
+        console.error(`\\nError: ${error.message}`);
+      }
       process.exit(1);
     }
   } else if (options.delete) {
     if (!options.deleteUrl) {
-      console.error('Error: No URL specified for deletion');
-      printUsage();
+      if (options.json) {
+        console.log(JSON.stringify({ error: 'No URL specified for deletion' }));
+      } else {
+        console.error('Error: No URL specified for deletion');
+        printUsage();
+      }
       process.exit(1);
     }
 
     if (!options.apiKey) {
-      console.error('Error: No API key provided. Use -key option or set PB_API_KEY environment variable.');
+      if (options.json) {
+        console.log(JSON.stringify({ error: 'No API key provided. Use -key option or set PB_API_KEY environment variable.' }));
+      } else {
+        console.error('Error: No API key provided. Use -key option or set PB_API_KEY environment variable.');
+      }
       process.exit(1);
     }
 
     try {
-      console.log(`Deleting ${options.deleteUrl}...`);
+      if (!options.json) {
+        console.log(`Deleting ${options.deleteUrl}...`);
+      }
       const result = await deleteFile(options.deleteUrl, options.apiKey);
-      console.log(`\\nSuccess! File deleted.`);
-      console.log(`File ID: ${result.fileId}`);
+      if (options.json) {
+        console.log(JSON.stringify(result));
+      } else {
+        console.log(`\\nSuccess! File deleted.`);
+        console.log(`File ID: ${result.fileId}`);
+      }
     } catch (error) {
-      console.error(`\\nError: ${error.message}`);
+      if (options.json) {
+        console.log(JSON.stringify({ error: error.message }));
+      } else {
+        console.error(`\\nError: ${error.message}`);
+      }
       process.exit(1);
     }
   } else {
     if (!options.file) {
-      console.error('Error: No file specified');
-      printUsage();
+      if (options.json) {
+        console.log(JSON.stringify({ error: 'No file specified' }));
+      } else {
+        console.error('Error: No file specified');
+        printUsage();
+      }
       process.exit(1);
     }
 
     if (!options.apiKey) {
-      console.error('Error: No API key provided. Use -key option or set PB_API_KEY environment variable.');
+      if (options.json) {
+        console.log(JSON.stringify({ error: 'No API key provided. Use -key option or set PB_API_KEY environment variable.' }));
+      } else {
+        console.error('Error: No API key provided. Use -key option or set PB_API_KEY environment variable.');
+      }
       process.exit(1);
     }
 
     try {
-      console.log(`Uploading ${options.file}...`);
-      const result = await uploadFile(options.file, options.apiKey, options.host);
-      console.log(`\\nSuccess! File uploaded.`);
-      console.log(`URL: ${result.url}`);
-      console.log(`File ID: ${result.fileId}`);
-      console.log(`Size: ${result.size} bytes`);
+      let expiresAt = null;
+      if (options.expiresAfter) {
+        try {
+          expiresAt = parseDuration(options.expiresAfter);
+        } catch (e) {
+          if (options.json) {
+            console.log(JSON.stringify({ error: e.message }));
+          } else {
+            console.error(`Error: ${e.message}`);
+          }
+          process.exit(1);
+        }
+      }
+      
+      if (!options.json) {
+        console.log(`Uploading ${options.file}...`);
+      }
+      const result = await uploadFile(options.file, options.apiKey, options.host, expiresAt);
+      if (options.json) {
+        console.log(JSON.stringify(result));
+      } else {
+        console.log(`\\nSuccess! File uploaded.`);
+        console.log(`URL: ${result.url}`);
+        console.log(`File ID: ${result.fileId}`);
+        console.log(`Size: ${result.size} bytes`);
+        if (result.expiresAt) {
+          console.log(`Expires: ${new Date(result.expiresAt).toLocaleString()}`);
+        }
+      }
     } catch (error) {
-      console.error(`\\nError: ${error.message}`);
+      if (options.json) {
+        console.log(JSON.stringify({ error: error.message }));
+      } else {
+        console.error(`\\nError: ${error.message}`);
+      }
       process.exit(1);
     }
   }

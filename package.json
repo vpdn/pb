@@ -1,6 +1,6 @@
 {
 	"name": "@vpdn/pb-sharelink",
-	"version": "0.0.1",
+	"version": "0.0.2",
 	"description": "A lightweight, serverless file upload and sharing service built on Cloudflare Workers",
 	"author": "vpdn",
 	"license": "MIT",

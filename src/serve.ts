@@ -42,10 +42,19 @@ export async function handleServe(
       original_name: string;
       content_type: string;
       size: number;
+      expires_at: string | null;
     }>();
 
     if (!upload) {
       return new Response('File not found', { status: 404 });
+    }
+    
+    // Check if file has expired
+    if (upload.expires_at) {
+      const expirationDate = new Date(upload.expires_at);
+      if (expirationDate < new Date()) {
+        return new Response('File has expired', { status: 410 }); // 410 Gone
+      }
     }
 
     const object = await bucket.get(fileId);

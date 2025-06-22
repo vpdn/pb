@@ -3,6 +3,7 @@ import { handleUpload } from './upload';
 import { handleServe } from './serve';
 import { handleDelete } from './delete';
 import { handleList } from './list';
+import { cleanupExpiredFiles } from './cleanup';
 
 export interface Env {
   DB: D1Database;
@@ -120,4 +121,15 @@ export default {
       headers: { 'Content-Type': 'text/plain', ...corsHeaders }
     });
   },
+  
+  async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
+    console.log('Running scheduled cleanup of expired files...');
+    
+    try {
+      const result = await cleanupExpiredFiles(env.DB, env.R2_BUCKET);
+      console.log(`Cleanup completed. Deleted ${result.deletedCount} expired files.`);
+    } catch (error) {
+      console.error('Scheduled cleanup failed:', error);
+    }
+  }
 } satisfies ExportedHandler<Env>;

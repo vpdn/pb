@@ -1,5 +1,8 @@
 # pb - Simple File Sharing Service
 
+[![npm version](https://img.shields.io/npm/v/@vpdn/pb-sharelink.svg)](https://www.npmjs.com/package/@vpdn/pb-sharelink)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 A lightweight, serverless file upload and sharing service built on Cloudflare Workers. Upload files securely and share them with permanent URLs.
 
 ![pb upload demo](./pb_upload.svg)
@@ -80,6 +83,8 @@ That's it! Your pb service is now running on `https://pb.YOUR_SUBDOMAIN.workers.
 npm install -g @vpdn/pb-sharelink
 ```
 
+The CLI is now available as `pb` command after installation.
+
 ## Using pb
 
 ### API Key Setup
@@ -148,10 +153,68 @@ pb document.pdf
 cat config.json | pb
 
 # List all your files
-pb list
+pb --list
+
+# List files in JSON format
+pb --list --json
 
 # Delete a file
-pb delete https://pb.YOUR_SUBDOMAIN.workers.dev/f/abc123def456
+pb --delete https://pb.YOUR_SUBDOMAIN.workers.dev/f/abc123def456
+
+# Upload with JSON output
+pb myfile.pdf --json
+
+# Upload with expiration (file expires in 24 hours)
+pb temp.txt --expiresAfter 24h
+
+# Upload with expiration (file expires in 7 days)
+pb document.pdf --expiresAfter 7d
+```
+
+### File Expiration
+
+Set automatic file expiration with the `--expiresAfter` flag:
+
+```bash
+# Expire in minutes
+pb temp.txt --expiresAfter 30m
+
+# Expire in hours  
+pb cache.json --expiresAfter 2h
+
+# Expire in days
+pb backup.zip --expiresAfter 7d
+
+# Expire in weeks
+pb archive.tar --expiresAfter 4w
+```
+
+**Features:**
+- Files are automatically deleted after expiration
+- Expired files return 410 (Gone) status
+- Cleanup runs every 5 minutes via Cloudflare Cron Triggers
+- List command shows remaining time until expiration
+
+### JSON Output
+
+All commands support `--json` flag for programmatic usage:
+
+```bash
+# Upload with JSON output
+pb file.txt --json
+# Output: {"url":"https://pb.example.com/f/abc123","fileId":"abc123","size":1234}
+
+# List files as JSON
+pb --list --json
+# Output: {"files":[{"fileId":"abc123","originalName":"file.txt","size":1234,"contentType":"text/plain","uploadedAt":"2024-01-01T00:00:00Z","url":"https://pb.example.com/f/abc123"}]}
+
+# Delete with JSON output
+pb --delete https://pb.example.com/f/abc123 --json
+# Output: {"message":"File deleted successfully","fileId":"abc123"}
+
+# Errors are also returned as JSON
+pb nonexistent.txt --json
+# Output: {"error":"File not found: nonexistent.txt"}
 ```
 
 ## API Reference

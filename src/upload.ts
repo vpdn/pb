@@ -6,6 +6,7 @@ export interface UploadResponse {
   url: string;
   fileId: string;
   size: number;
+  expiresAt?: string;
 }
 
 export async function handleUpload(
@@ -18,6 +19,7 @@ export async function handleUpload(
   try {
     const formData = await request.formData();
     const file = formData.get('file') as File;
+    const expiresAt = formData.get('expires_at') as string | null;
     
     if (!file) {
       return new Response(JSON.stringify({ error: 'No file provided' }), {
@@ -40,14 +42,18 @@ export async function handleUpload(
     });
 
     await db.prepare(
-      'INSERT INTO uploads (file_id, original_name, size, content_type, api_key_id) VALUES (?, ?, ?, ?, ?)'
-    ).bind(fileId, file.name, file.size, file.type, apiKey.id).run();
+      'INSERT INTO uploads (file_id, original_name, size, content_type, api_key_id, expires_at) VALUES (?, ?, ?, ?, ?, ?)'
+    ).bind(fileId, file.name, file.size, file.type, apiKey.id, expiresAt).run();
 
     const response: UploadResponse = {
       url: `${baseUrl}/f/${fileId}`,
       fileId,
       size: file.size
     };
+    
+    if (expiresAt) {
+      response.expiresAt = expiresAt;
+    }
 
     return new Response(JSON.stringify(response), {
       status: 200,
