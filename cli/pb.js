@@ -68,6 +68,60 @@ function formatBytes(bytes) {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
 
+function toPosixPath(filePath) {
+  return filePath.split(path.sep).join('/');
+}
+
+function walkDirectory(root, current, files) {
+  const entries = fs.readdirSync(current, { withFileTypes: true });
+
+  entries.forEach((entry) => {
+    const absolutePath = path.join(current, entry.name);
+    if (entry.isDirectory()) {
+      walkDirectory(root, absolutePath, files);
+    } else if (entry.isFile()) {
+      const relativePath = path.relative(root, absolutePath);
+      files.push({
+        absolutePath,
+        relativePath: toPosixPath(relativePath),
+        size: fs.statSync(absolutePath).size,
+        contentType: getContentType(absolutePath)
+      });
+    }
+  });
+}
+
+function collectFilesForUpload(targetPath) {
+  const stats = fs.statSync(targetPath);
+
+  if (stats.isFile()) {
+    const fileName = path.basename(targetPath);
+    return {
+      isDirectory: false,
+      files: [{
+        absolutePath: targetPath,
+        relativePath: fileName,
+        size: stats.size,
+        contentType: getContentType(targetPath)
+      }]
+    };
+  }
+
+  if (stats.isDirectory()) {
+    const files = [];
+    walkDirectory(targetPath, targetPath, files);
+
+    files.sort((a, b) => a.relativePath.localeCompare(b.relativePath));
+
+    return {
+      isDirectory: true,
+      files
+    };
+  }
+
+  throw new Error(`Unsupported file type: ${targetPath}`);
+}
+
 function parseDuration(duration) {
   if (!duration) return null;
   
@@ -119,6 +173,7 @@ Options:
 Examples:
   pb ./image.png
   pb ./document.pdf -key PB_API_KEY
+  pb ./my-site/ -key PB_API_KEY
   PB_API_KEY=PB_API_KEY pb ./file.txt
   pb --delete https://pb.nxh.ch/f/abc123 -key PB_API_KEY
   pb --list -key PB_API_KEY
@@ -172,28 +227,26 @@ async function uploadFile(filePath, apiKey, host, expiresAt = null) {
     throw new Error(`File not found: ${filePath}`);
   }
 
-  const stats = fs.statSync(filePath);
-  if (!stats.isFile()) {
-    throw new Error(`Not a file: ${filePath}`);
+  const { isDirectory, files } = collectFilesForUpload(filePath);
+
+  if (isDirectory && files.length === 0) {
+    throw new Error(`Directory is empty: ${filePath}`);
   }
 
-  const fileName = path.basename(filePath);
-  const fileBuffer = fs.readFileSync(filePath);
-  
-  // Detect content type based on file extension
-  const contentType = getContentType(fileName);
-  
-  // Create form data manually
   const boundary = '----FormBoundary' + Math.random().toString(36).substr(2);
-  const formDataParts = [
-    Buffer.from(`--${boundary}\r\n`),
-    Buffer.from(`Content-Disposition: form-data; name="file"; filename="${fileName}"\r\n`),
-    Buffer.from(`Content-Type: ${contentType}\r\n\r\n`),
-    fileBuffer,
-    Buffer.from(`\r\n`)
-  ];
-  
-  // Add expiration field if provided
+  const formDataParts = [];
+
+  files.forEach((file) => {
+    const fileBuffer = fs.readFileSync(file.absolutePath);
+    formDataParts.push(
+      Buffer.from(`--${boundary}\r\n`),
+      Buffer.from(`Content-Disposition: form-data; name="file"; filename="${file.relativePath}"\r\n`),
+      Buffer.from(`Content-Type: ${file.contentType}\r\n\r\n`),
+      fileBuffer,
+      Buffer.from(`\r\n`)
+    );
+  });
+
   if (expiresAt) {
     formDataParts.push(
       Buffer.from(`--${boundary}\r\n`),
@@ -202,7 +255,16 @@ async function uploadFile(filePath, apiKey, host, expiresAt = null) {
       Buffer.from(`\r\n`)
     );
   }
-  
+
+  if (isDirectory) {
+    formDataParts.push(
+      Buffer.from(`--${boundary}\r\n`),
+      Buffer.from(`Content-Disposition: form-data; name="directory_upload"\r\n\r\n`),
+      Buffer.from('true'),
+      Buffer.from(`\r\n`)
+    );
+  }
+
   formDataParts.push(Buffer.from(`--${boundary}--\r\n`));
   const formData = Buffer.concat(formDataParts);
 
@@ -224,7 +286,7 @@ async function uploadFile(filePath, apiKey, host, expiresAt = null) {
     const protocol = url.protocol === 'https:' ? https : require('http');
     
     // Show file size only for larger files
-    const showProgress = formData.length > 1024 * 1024; // Show progress for files > 1MB
+    const showProgress = formData.length > 1024 * 1024; // Show progress for payloads > 1MB
     
     const req = protocol.request(options, (res) => {
       let data = '';
@@ -443,7 +505,8 @@ async function main() {
       // Create table with console-table-printer
       const columns = [
         { name: '#', alignment: 'right' },
-        { name: 'File Name', alignment: 'left' },
+        { name: 'Group', alignment: 'left' },
+        { name: 'Path', alignment: 'left' },
         { name: 'URL', alignment: 'left' },
         { name: 'Size', alignment: 'right' },
         { name: 'Type', alignment: 'left' },
@@ -498,9 +561,11 @@ async function main() {
           sizeStr = `${Math.round(gb)} GB`;
         }
         
+        const displayName = file.relativePath || file.originalName;
         const row = {
           '#': index + 1,
-          'File Name': file.originalName,
+          'Group': file.groupId || file.fileId,
+          'Path': displayName,
           'URL': file.url,
           'Size': sizeStr,
           'Type': file.contentType || 'unknown',
@@ -550,6 +615,10 @@ async function main() {
       const result = await deleteFile(options.deleteUrl, options.apiKey);
       if (options.json) {
         console.log(JSON.stringify(result));
+      } else if (result.deletedCount) {
+        console.log(`\\nSuccess! Folder deleted.`);
+        console.log(`Folder ID: ${result.fileId}`);
+        console.log(`Files removed: ${result.deletedCount}`);
       } else {
         console.log(`\\nSuccess! File deleted.`);
         console.log(`File ID: ${result.fileId}`);
@@ -598,11 +667,38 @@ async function main() {
       }
       
       if (!options.json) {
-        console.log(`Uploading ${options.file}...`);
+        try {
+          const stats = fs.statSync(options.file);
+          const type = stats.isDirectory() ? 'directory' : 'file';
+          console.log(`Uploading ${type} ${options.file}...`);
+        } catch {
+          console.log(`Uploading ${options.file}...`);
+        }
       }
       const result = await uploadFile(options.file, options.apiKey, options.host, expiresAt);
       if (options.json) {
         console.log(JSON.stringify(result));
+      } else if (result.isDirectory) {
+        console.log(`\\nSuccess! Folder uploaded.`);
+        console.log(`Base URL: ${result.url}`);
+        console.log(`Folder ID: ${result.fileId}`);
+        const totalFiles = result.files ? result.files.length : 0;
+        console.log(`Files: ${totalFiles}`);
+        console.log(`Total Size: ${formatBytes(result.size)} (${result.size} bytes)`);
+        if (totalFiles > 0) {
+          const previewLimit = 5;
+          const preview = result.files.slice(0, previewLimit);
+          console.log(`Sample files:`);
+          preview.forEach((file) => {
+            console.log(`  - ${file.relativePath || file.originalName}`);
+          });
+          if (totalFiles > previewLimit) {
+            console.log(`  ... (${totalFiles - previewLimit} more)`);
+          }
+        }
+        if (result.expiresAt) {
+          console.log(`Expires: ${new Date(result.expiresAt).toLocaleString()}`);
+        }
       } else {
         console.log(`\\nSuccess! File uploaded.`);
         console.log(`URL: ${result.url}`);

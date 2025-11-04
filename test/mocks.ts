@@ -7,7 +7,7 @@ export function createMockD1Database() {
     bind: vi.fn().mockReturnThis(),
     first: vi.fn(async () => mockResults.get('first')),
     run: vi.fn(async () => ({ success: true })),
-    all: vi.fn(async () => mockResults.get('all') || [])
+    all: vi.fn(async () => mockResults.get('all') || { success: true, results: [] })
   };
 
   const db = {
@@ -77,7 +77,10 @@ export function createMockRequest(
   return request;
 }
 
-export function createMockFormData(files: { name: string; content: string | ArrayBuffer; type?: string }[]) {
+export function createMockFormData(
+  files: { name: string; content: string | ArrayBuffer; type?: string }[],
+  options: { directoryUpload?: boolean; expiresAt?: string } = {}
+) {
   const formData = new FormData();
   
   files.forEach(({ name, content, type = 'application/octet-stream' }) => {
@@ -85,6 +88,14 @@ export function createMockFormData(files: { name: string; content: string | Arra
     const file = new File([blob], name, { type });
     formData.append('file', file);
   });
+
+  if (options.expiresAt) {
+    formData.append('expires_at', options.expiresAt);
+  }
+
+  if (options.directoryUpload) {
+    formData.append('directory_upload', 'true');
+  }
 
   return formData;
 }

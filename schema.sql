@@ -10,13 +10,17 @@ CREATE TABLE IF NOT EXISTS api_keys (
 CREATE TABLE IF NOT EXISTS uploads (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   file_id TEXT UNIQUE NOT NULL,
+  group_id TEXT NOT NULL,
   original_name TEXT NOT NULL,
+  relative_path TEXT,
   size INTEGER NOT NULL,
   content_type TEXT,
   api_key_id INTEGER NOT NULL,
   uploaded_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  expires_at DATETIME DEFAULT NULL,
   FOREIGN KEY (api_key_id) REFERENCES api_keys(id)
 );
 
 CREATE INDEX idx_file_id ON uploads(file_id);
+CREATE INDEX idx_group_id ON uploads(group_id);
 CREATE INDEX idx_api_key ON api_keys(key);

@@ -51,7 +51,16 @@ describe('Upload Handler', () => {
       expect(responseData).toEqual({
         url: 'https://example.com/f/mock_file_id_12',
         fileId: 'mock_file_id_12',
-        size: 12 // 'file content'.length
+        size: 12, // 'file content'.length
+        files: [
+          {
+            url: 'https://example.com/f/mock_file_id_12',
+            fileId: 'mock_file_id_12',
+            originalName: 'test.pdf',
+            size: 12,
+            contentType: 'application/pdf'
+          }
+        ]
       });
 
       // Verify R2 bucket put was called
@@ -64,21 +73,24 @@ describe('Upload Handler', () => {
           },
           customMetadata: {
             originalName: 'test.pdf',
-            uploadedBy: 'Test Key'
+            uploadedBy: 'Test Key',
+            groupId: 'mock_file_id_12',
+            relativePath: ''
           }
         }
       );
 
       // Verify database insert
-      expect(mockDb.prepare).toHaveBeenCalledWith(
-        'INSERT INTO uploads (file_id, original_name, size, content_type, api_key_id) VALUES (?, ?, ?, ?, ?)'
-      );
+      expect(mockDb.prepare).toHaveBeenCalledWith(expect.stringContaining('INSERT INTO uploads'));
       expect(mockDb._getMockStatement().bind).toHaveBeenCalledWith(
         'mock_file_id_12',
+        'mock_file_id_12',
         'test.pdf',
+        null,
         12,
         'application/pdf',
-        1
+        1,
+        null
       );
     });
 
@@ -195,6 +207,102 @@ describe('Upload Handler', () => {
       expect(consoleSpy).toHaveBeenCalled();
 
       consoleSpy.mockRestore();
+    });
+
+    it('should upload a directory and preserve structure', async () => {
+      const formData = createMockFormData(
+        [
+          { name: 'folder/index.txt', content: 'file-one', type: 'text/plain' },
+          { name: 'folder/sub/file-two.txt', content: 'file-two', type: 'text/plain' }
+        ],
+        { directoryUpload: true }
+      );
+
+      const request = new Request('https://example.com/upload', {
+        method: 'POST',
+        body: formData
+      });
+
+      const response = await handleUpload(
+        request,
+        mockDb as any,
+        mockBucket as any,
+        mockApiKey,
+        'https://example.com'
+      );
+
+      const responseData = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(responseData.isDirectory).toBe(true);
+      expect(responseData.url).toBe('https://example.com/f/mock_file_id_12');
+      expect(responseData.fileId).toBe('mock_file_id_12');
+      expect(responseData.size).toBe(16);
+      expect(responseData.files).toEqual([
+        {
+          url: 'https://example.com/f/mock_file_id_12/folder/index.txt',
+          fileId: 'mock_file_id_12/folder/index.txt',
+          originalName: 'index.txt',
+          relativePath: 'folder/index.txt',
+          size: 8,
+          contentType: 'text/plain'
+        },
+        {
+          url: 'https://example.com/f/mock_file_id_12/folder/sub/file-two.txt',
+          fileId: 'mock_file_id_12/folder/sub/file-two.txt',
+          originalName: 'file-two.txt',
+          relativePath: 'folder/sub/file-two.txt',
+          size: 8,
+          contentType: 'text/plain'
+        }
+      ]);
+
+      expect(mockBucket.put).toHaveBeenNthCalledWith(
+        1,
+        'mock_file_id_12/folder/index.txt',
+        expect.any(ArrayBuffer),
+        expect.objectContaining({
+          customMetadata: expect.objectContaining({
+            groupId: 'mock_file_id_12',
+            relativePath: 'folder/index.txt'
+          })
+        })
+      );
+
+      expect(mockBucket.put).toHaveBeenNthCalledWith(
+        2,
+        'mock_file_id_12/folder/sub/file-two.txt',
+        expect.any(ArrayBuffer),
+        expect.objectContaining({
+          customMetadata: expect.objectContaining({
+            groupId: 'mock_file_id_12',
+            relativePath: 'folder/sub/file-two.txt'
+          })
+        })
+      );
+
+      const bindCalls = mockDb._getMockStatement().bind.mock.calls;
+      expect(bindCalls).toHaveLength(2);
+      expect(bindCalls[0]).toEqual([
+        'mock_file_id_12/folder/index.txt',
+        'mock_file_id_12',
+        'index.txt',
+        'folder/index.txt',
+        8,
+        'text/plain',
+        1,
+        null
+      ]);
+      expect(bindCalls[1]).toEqual([
+        'mock_file_id_12/folder/sub/file-two.txt',
+        'mock_file_id_12',
+        'file-two.txt',
+        'folder/sub/file-two.txt',
+        8,
+        'text/plain',
+        1,
+        null
+      ]);
     });
 
     it('should handle large files correctly', async () => {

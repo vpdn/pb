@@ -151,6 +151,8 @@ curl -X POST \
 pb screenshot.png
 pb document.pdf
 cat config.json | pb
+# Upload an entire directory (structure is preserved under a shared prefix)
+pb ./static-site
 
 # List all your files
 pb --list
@@ -159,6 +161,8 @@ pb --list
 pb --list --json
 
 # Delete a file
+pb --delete https://pb.YOUR_SUBDOMAIN.workers.dev/f/abc123def456
+# Delete an entire directory (use the shared prefix returned during upload)
 pb --delete https://pb.YOUR_SUBDOMAIN.workers.dev/f/abc123def456
 
 # Upload with JSON output

@@ -82,6 +82,43 @@ describe('Delete Handler', () => {
       expect(mockBucket.delete).not.toHaveBeenCalled();
     });
 
+    it('should delete all files in a folder when provided with the group id', async () => {
+      mockDb._setMockResult('first', null);
+      mockDb._setMockResult('all', {
+        success: true,
+        results: [
+          { file_id: 'folder123/index.html' },
+          { file_id: 'folder123/assets/style.css' }
+        ]
+      });
+
+      const response = await handleDelete(
+        'folder123',
+        mockDb as any,
+        mockBucket as any,
+        mockApiKey
+      );
+
+      const responseData = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(responseData).toEqual({
+        message: 'Folder deleted successfully',
+        fileId: 'folder123',
+        deletedCount: 2
+      });
+
+      expect(mockBucket.delete).toHaveBeenNthCalledWith(1, 'folder123/index.html');
+      expect(mockBucket.delete).toHaveBeenNthCalledWith(2, 'folder123/assets/style.css');
+
+      expect(mockDb.prepare).toHaveBeenCalledWith(
+        'SELECT file_id FROM uploads WHERE group_id = ? AND api_key_id = ?'
+      );
+      expect(mockDb.prepare).toHaveBeenCalledWith(
+        'DELETE FROM uploads WHERE group_id = ? AND api_key_id = ?'
+      );
+    });
+
     it('should prevent deleting files owned by other API keys', async () => {
       const mockUpload = {
         file_id: 'test_file_123',

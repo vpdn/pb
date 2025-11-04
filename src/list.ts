@@ -4,7 +4,9 @@ export async function handleList(db: D1Database, apiKey: { id: number; key: stri
     const result = await db.prepare(`
       SELECT 
         file_id,
+        group_id,
         original_name,
+        relative_path,
         size,
         content_type,
         uploaded_at,
@@ -23,14 +25,25 @@ export async function handleList(db: D1Database, apiKey: { id: number; key: stri
 
     // Format the results to include file URLs
     const files = result.results.map((file: any) => {
+      const url = `https://pb.nxh.ch/f/${file.file_id}`;
+      const groupId = file.group_id || (file.file_id?.split('/')?.[0] ?? file.file_id);
+
       const fileInfo: any = {
         fileId: file.file_id,
+        groupId,
         originalName: file.original_name,
         size: file.size,
         contentType: file.content_type,
         uploadedAt: file.uploaded_at,
-        url: `https://pb.nxh.ch/f/${file.file_id}` // Using the custom domain from the CLI
+        url
       };
+
+      if (file.relative_path) {
+        fileInfo.relativePath = file.relative_path;
+        fileInfo.isDirectoryItem = true;
+      } else {
+        fileInfo.isDirectoryItem = false;
+      }
       
       if (file.expires_at) {
         fileInfo.expiresAt = file.expires_at;

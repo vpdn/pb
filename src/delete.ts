@@ -14,27 +14,69 @@ export async function handleDelete(
       .bind(fileId, apiKey.id)
       .first();
 
-    if (!upload) {
-      return new Response(JSON.stringify({ error: 'File not found or access denied' }), {
-        status: 404,
+    if (upload) {
+      // Delete single file
+      await bucket.delete(fileId);
+
+      await db
+        .prepare('DELETE FROM uploads WHERE file_id = ? AND api_key_id = ?')
+        .bind(fileId, apiKey.id)
+        .run();
+
+      return new Response(JSON.stringify({ 
+        message: 'File deleted successfully',
+        fileId: fileId 
+      }), {
+        status: 200,
         headers: { 'Content-Type': 'application/json' }
       });
     }
 
-    // Delete from R2 storage
-    await bucket.delete(fileId);
-
-    // Delete from database
-    await db
-      .prepare('DELETE FROM uploads WHERE file_id = ? AND api_key_id = ?')
+    // If no single file was found, attempt to delete an entire group/folder
+    const folderQuery = await db
+      .prepare('SELECT file_id FROM uploads WHERE group_id = ? AND api_key_id = ?')
       .bind(fileId, apiKey.id)
-      .run();
+      .all();
 
-    return new Response(JSON.stringify({ 
-      message: 'File deleted successfully',
-      fileId: fileId 
-    }), {
-      status: 200,
+    const isResultObject = folderQuery && typeof folderQuery === 'object' && 'results' in folderQuery;
+    const folderSuccess = isResultObject ? (folderQuery as any).success !== false : true;
+    const folderResults = Array.isArray(folderQuery)
+      ? folderQuery
+      : isResultObject
+        ? (folderQuery as any).results
+        : [];
+
+    if (!folderSuccess) {
+      return new Response(JSON.stringify({ error: 'Delete failed' }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+
+    if (folderResults.length > 0) {
+      const fileIds = folderResults.map((row: any) => row.file_id as string);
+
+      for (const key of fileIds) {
+        await bucket.delete(key);
+      }
+
+      await db
+        .prepare('DELETE FROM uploads WHERE group_id = ? AND api_key_id = ?')
+        .bind(fileId, apiKey.id)
+        .run();
+
+      return new Response(JSON.stringify({
+        message: 'Folder deleted successfully',
+        fileId,
+        deletedCount: fileIds.length
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+
+    return new Response(JSON.stringify({ error: 'File not found or access denied' }), {
+      status: 404,
       headers: { 'Content-Type': 'application/json' }
     });
 

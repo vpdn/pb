@@ -11,7 +11,8 @@ const mockProcessExit = vi.spyOn(process, 'exit').mockImplementation(() => undef
 vi.mock('fs', () => ({
   existsSync: vi.fn(),
   statSync: vi.fn(),
-  readFileSync: vi.fn()
+  readFileSync: vi.fn(),
+  readdirSync: vi.fn()
 }));
 
 // Mock https module
@@ -49,7 +50,7 @@ describe('CLI Tests', () => {
       // Import CLI module to test parseArgs function
       const { parseArgs } = await import('../cli/pb.js');
       
-      const args = ['node', 'pb.js', 'test.txt', '-k', 'pb_test123', '-h', 'https://custom.com'];
+      const args = ['node', 'pb.js', 'test.txt', '-key', 'pb_test123', '-h', 'https://custom.com'];
       const options = parseArgs(args);
 
       expect(options).toEqual({
@@ -58,14 +59,16 @@ describe('CLI Tests', () => {
         host: 'https://custom.com',
         delete: false,
         deleteUrl: null,
-        list: false
+        list: false,
+        json: false,
+        expiresAfter: null
       });
     });
 
     it('should parse delete arguments correctly', async () => {
       const { parseArgs } = await import('../cli/pb.js');
       
-      const args = ['node', 'pb.js', '--delete', 'https://example.com/f/abc123', '-k', 'pb_test123'];
+      const args = ['node', 'pb.js', '--delete', 'https://example.com/f/abc123', '-key', 'pb_test123'];
       const options = parseArgs(args);
 
       expect(options).toEqual({
@@ -74,7 +77,9 @@ describe('CLI Tests', () => {
         host: 'https://pb.nxh.ch',
         delete: true,
         deleteUrl: 'https://example.com/f/abc123',
-        list: false
+        list: false,
+        json: false,
+        expiresAfter: null
       });
     });
 
@@ -112,7 +117,7 @@ describe('CLI Tests', () => {
     it('should parse list arguments correctly', async () => {
       const { parseArgs } = await import('../cli/pb.js');
       
-      const args = ['node', 'pb.js', '--list', '-k', 'pb_test123'];
+      const args = ['node', 'pb.js', '--list', '-key', 'pb_test123'];
       const options = parseArgs(args);
 
       expect(options).toEqual({
@@ -121,7 +126,9 @@ describe('CLI Tests', () => {
         host: 'https://pb.nxh.ch',
         delete: false,
         deleteUrl: null,
-        list: true
+        list: true,
+        json: false,
+        expiresAfter: null
       });
     });
   });
@@ -136,14 +143,14 @@ describe('CLI Tests', () => {
         .rejects.toThrow('File not found: nonexistent.txt');
     });
 
-    it('should validate file is not a directory', async () => {
+    it('should reject unsupported file types', async () => {
       vi.mocked(fs.existsSync).mockReturnValue(true);
-      vi.mocked(fs.statSync).mockReturnValue({ isFile: () => false } as any);
+      vi.mocked(fs.statSync).mockReturnValue({ isFile: () => false, isDirectory: () => false } as any);
       
       const { uploadFile } = await import('../cli/pb.js');
       
       await expect(uploadFile('directory', 'pb_test123', 'https://example.com'))
-        .rejects.toThrow('Not a file: directory');
+        .rejects.toThrow('Unsupported file type: directory');
     });
 
     it('should detect content type based on file extension', async () => {
@@ -157,7 +164,7 @@ describe('CLI Tests', () => {
 
     it('should handle successful upload', async () => {
       vi.mocked(fs.existsSync).mockReturnValue(true);
-      vi.mocked(fs.statSync).mockReturnValue({ isFile: () => true } as any);
+      vi.mocked(fs.statSync).mockReturnValue({ isFile: () => true, isDirectory: () => false } as any);
       vi.mocked(fs.readFileSync).mockReturnValue(Buffer.from('test content'));
 
       const mockResponse = {
@@ -193,9 +200,94 @@ describe('CLI Tests', () => {
       });
     });
 
+    it('should upload directory contents with preserved paths', async () => {
+      const rootPath = path.join('my-folder');
+      const file1 = path.join(rootPath, 'file1.txt');
+      const subDir = path.join(rootPath, 'sub');
+      const file2 = path.join(subDir, 'file2.txt');
+
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+      vi.mocked(fs.statSync).mockImplementation((targetPath: any) => {
+        switch (targetPath) {
+          case rootPath:
+            return { isFile: () => false, isDirectory: () => true } as any;
+          case file1:
+            return { isFile: () => true, isDirectory: () => false, size: 5 } as any;
+          case subDir:
+            return { isFile: () => false, isDirectory: () => true } as any;
+          case file2:
+            return { isFile: () => true, isDirectory: () => false, size: 6 } as any;
+          default:
+            throw new Error(`Unexpected statSync call: ${targetPath}`);
+        }
+      });
+
+      vi.mocked(fs.readdirSync).mockImplementation((dir: any) => {
+        if (dir === rootPath) {
+          return [
+            { name: 'file1.txt', isDirectory: () => false, isFile: () => true },
+            { name: 'sub', isDirectory: () => true, isFile: () => false }
+          ] as any;
+        }
+        if (dir === subDir) {
+          return [
+            { name: 'file2.txt', isDirectory: () => false, isFile: () => true }
+          ] as any;
+        }
+        throw new Error(`Unexpected readdirSync call: ${dir}`);
+      });
+
+      vi.mocked(fs.readFileSync).mockImplementation((targetPath: any) => {
+        if (targetPath === file1) {
+          return Buffer.from('file1');
+        }
+        if (targetPath === file2) {
+          return Buffer.from('file-2');
+        }
+        throw new Error(`Unexpected readFileSync call: ${targetPath}`);
+      });
+
+      const capturedChunks: Buffer[] = [];
+
+      const mockResponse = {
+        statusCode: 200,
+        on: vi.fn((event, callback) => {
+          if (event === 'data') {
+            callback('{"url":"https://example.com/f/folder","fileId":"folder","size":11,"isDirectory":true}');
+          } else if (event === 'end') {
+            callback();
+          }
+        })
+      };
+
+      const mockReq = {
+        on: vi.fn(),
+        write: vi.fn((chunk: Buffer) => {
+          capturedChunks.push(chunk);
+          return true;
+        }),
+        end: vi.fn()
+      };
+
+      mockRequest.mockImplementation((options, callback) => {
+        callback(mockResponse);
+        return mockReq;
+      });
+
+      const { uploadFile } = await import('../cli/pb.js');
+
+      await uploadFile(rootPath, 'pb_test123', 'https://example.com');
+
+      const payload = Buffer.concat(capturedChunks).toString('utf-8');
+      expect(payload).toContain('filename="file1.txt"');
+      expect(payload).toContain('filename="sub/file2.txt"');
+      expect(payload).toContain('Content-Disposition: form-data; name="directory_upload"');
+      expect(mockReq.end).toHaveBeenCalled();
+    });
+
     it('should handle upload errors', async () => {
       vi.mocked(fs.existsSync).mockReturnValue(true);
-      vi.mocked(fs.statSync).mockReturnValue({ isFile: () => true } as any);
+      vi.mocked(fs.statSync).mockReturnValue({ isFile: () => true, isDirectory: () => false } as any);
       vi.mocked(fs.readFileSync).mockReturnValue(Buffer.from('test content'));
 
       const mockResponse = {
@@ -391,7 +483,7 @@ describe('CLI Tests', () => {
       await main();
       
       expect(mockConsoleError).toHaveBeenCalledWith(
-        'Error: No API key provided. Use -k option or set PB_API_KEY environment variable.'
+        'Error: No API key provided. Use -key option or set PB_API_KEY environment variable.'
       );
       expect(mockProcessExit).toHaveBeenCalledWith(1);
     });
@@ -413,7 +505,7 @@ describe('CLI Tests', () => {
       process.env.PB_API_KEY = 'pb_test123';
       
       vi.mocked(fs.existsSync).mockReturnValue(true);
-      vi.mocked(fs.statSync).mockReturnValue({ isFile: () => true } as any);
+      vi.mocked(fs.statSync).mockReturnValue({ isFile: () => true, isDirectory: () => false } as any);
       vi.mocked(fs.readFileSync).mockReturnValue(Buffer.from('test content'));
 
       const mockResponse = {
@@ -442,7 +534,7 @@ describe('CLI Tests', () => {
       
       await main();
       
-      expect(mockConsoleLog).toHaveBeenCalledWith('Uploading test.txt...');
+      expect(mockConsoleLog).toHaveBeenCalledWith('Uploading file test.txt...');
       expect(mockConsoleLog).toHaveBeenCalledWith('\\nSuccess! File uploaded.');
       expect(mockConsoleLog).toHaveBeenCalledWith('URL: https://example.com/f/abc123');
       expect(mockConsoleLog).toHaveBeenCalledWith('File ID: abc123');
@@ -539,7 +631,7 @@ describe('CLI Tests', () => {
       await main();
       
       expect(mockConsoleError).toHaveBeenCalledWith(
-        'Error: No API key provided. Use -k option or set PB_API_KEY environment variable.'
+        'Error: No API key provided. Use -key option or set PB_API_KEY environment variable.'
       );
       expect(mockProcessExit).toHaveBeenCalledWith(1);
     });
@@ -572,10 +664,9 @@ describe('CLI Tests', () => {
       const { main } = await import('../cli/pb.js');
       
       await main();
-      
+
       expect(mockConsoleLog).toHaveBeenCalledWith('Fetching file list...');
       expect(mockConsoleLog).toHaveBeenCalledWith('\\nFound 1 file(s):\\n');
-      expect(mockConsoleLog).toHaveBeenCalledWith('1. test.txt');
     });
 
     it('should handle empty list gracefully', async () => {

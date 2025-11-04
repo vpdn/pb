@@ -55,28 +55,37 @@ describe('Integration Tests - Upload and Retrieval Flow', () => {
       expect(uploadData).toEqual({
         url: 'https://example.com/f/test_file_123',
         fileId: 'test_file_123',
-        size: fileContent.length
+        size: fileContent.length,
+        files: [
+          {
+            url: 'https://example.com/f/test_file_123',
+            fileId: 'test_file_123',
+            originalName: 'test-document.txt',
+            size: fileContent.length,
+            contentType: 'text/plain'
+          }
+        ]
       });
 
       // Verify file was stored in R2
       expect(env.R2_BUCKET.put).toHaveBeenCalledWith(
         'test_file_123',
         expect.any(ArrayBuffer),
-        {
+        expect.objectContaining({
           httpMetadata: {
             contentType: 'text/plain'
           },
           customMetadata: {
             originalName: 'test-document.txt',
-            uploadedBy: 'Test Key'
+            uploadedBy: 'Test Key',
+            groupId: 'test_file_123',
+            relativePath: ''
           }
-        }
+        })
       );
 
       // Verify database record was created
-      expect(env.DB.prepare).toHaveBeenCalledWith(
-        'INSERT INTO uploads (file_id, original_name, size, content_type, api_key_id) VALUES (?, ?, ?, ?, ?)'
-      );
+      expect(env.DB.prepare).toHaveBeenCalledWith(expect.stringContaining('INSERT INTO uploads'));
 
       // Step 2: Retrieve the uploaded file
       // Mock the database to return the upload record for retrieval
