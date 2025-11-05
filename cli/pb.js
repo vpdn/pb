@@ -126,17 +126,17 @@ function collectFilesForUpload(targetPath, recursive = false) {
 
 function parseDuration(duration) {
   if (!duration) return null;
-  
+
   const regex = /^(\d+)([mhdw])$/;
   const match = duration.toLowerCase().match(regex);
-  
+
   if (!match) {
     throw new Error('Invalid duration format. Use formats like: 30m, 24h, 7d, 1w');
   }
-  
+
   const value = parseInt(match[1]);
   const unit = match[2];
-  
+
   let milliseconds;
   switch (unit) {
     case 'm': milliseconds = value * 60 * 1000; break;
@@ -144,8 +144,32 @@ function parseDuration(duration) {
     case 'd': milliseconds = value * 24 * 60 * 60 * 1000; break;
     case 'w': milliseconds = value * 7 * 24 * 60 * 60 * 1000; break;
   }
-  
+
   return new Date(Date.now() + milliseconds).toISOString();
+}
+
+function parseThresholdTimestamp(duration) {
+  if (!duration) return null;
+
+  const regex = /^(\d+)([mhdw])$/;
+  const match = duration.toLowerCase().match(regex);
+
+  if (!match) {
+    throw new Error('Invalid duration format. Use formats like: 30m, 24h, 7d, 1w');
+  }
+
+  const value = parseInt(match[1]);
+  const unit = match[2];
+
+  let milliseconds;
+  switch (unit) {
+    case 'm': milliseconds = value * 60 * 1000; break;
+    case 'h': milliseconds = value * 60 * 60 * 1000; break;
+    case 'd': milliseconds = value * 24 * 60 * 60 * 1000; break;
+    case 'w': milliseconds = value * 7 * 24 * 60 * 60 * 1000; break;
+  }
+
+  return new Date(Date.now() - milliseconds).toISOString();
 }
 
 function createProgressBar(current, total, width = 30) {
@@ -161,6 +185,7 @@ function printUsage() {
   console.log(`
 Usage: pb <file> [options]
        pb --delete <url> [options]
+       pb --delete --notAccessedSince <time> [options]
        pb --list [options]
 
 Options:
@@ -171,6 +196,7 @@ Options:
   --recursive, -R        Include subdirectories when uploading folders
   --json                 Output results in JSON format
   --expiresAfter <time>  Set file expiration (e.g., 30m, 24h, 7d, 1w)
+  --notAccessedSince <time>  Delete files not accessed since duration (use with --delete)
   --help                 Show this help message
 
 Examples:
@@ -179,6 +205,7 @@ Examples:
   pb ./my-site/ --recursive -key PB_API_KEY
   PB_API_KEY=PB_API_KEY pb ./file.txt
   pb --delete https://pb.nxh.ch/f/abc123 -key PB_API_KEY
+  pb --delete --notAccessedSince 30d -key PB_API_KEY
   pb --list -key PB_API_KEY
   pb --list --json -key PB_API_KEY
   pb ./file.txt --json -key PB_API_KEY
@@ -196,7 +223,8 @@ function parseArgs(args) {
     list: false,
     json: false,
     expiresAfter: null,
-    recursive: false
+    recursive: false,
+    notAccessedSince: null
   };
 
   for (let i = 2; i < args.length; i++) {
@@ -211,7 +239,10 @@ function parseArgs(args) {
       options.host = args[++i];
     } else if (arg === '--delete') {
       options.delete = true;
-      options.deleteUrl = args[++i];
+      // Only consume next arg as URL if it's not another flag
+      if (args[i + 1] && !args[i + 1].startsWith('--') && !args[i + 1].startsWith('-')) {
+        options.deleteUrl = args[++i];
+      }
     } else if (arg === '--list') {
       options.list = true;
     } else if (arg === '--recursive' || arg === '-R') {
@@ -220,6 +251,8 @@ function parseArgs(args) {
       options.json = true;
     } else if (arg === '--expiresAfter') {
       options.expiresAfter = args[++i];
+    } else if (arg === '--notAccessedSince') {
+      options.notAccessedSince = args[++i];
     } else if (!options.file && !options.delete && !options.list) {
       options.file = arg;
     }
@@ -435,7 +468,7 @@ async function deleteFile(url, apiKey) {
 
 async function listFiles(apiKey, host) {
   const url = new URL('/list', host);
-  
+
   return new Promise((resolve, reject) => {
     const options = {
       hostname: url.hostname,
@@ -448,14 +481,14 @@ async function listFiles(apiKey, host) {
     };
 
     const protocol = url.protocol === 'https:' ? https : require('http');
-    
+
     const req = protocol.request(options, (res) => {
       let data = '';
-      
+
       res.on('data', (chunk) => {
         data += chunk;
       });
-      
+
       res.on('end', () => {
         if (res.statusCode === 200) {
           try {
@@ -480,8 +513,160 @@ async function listFiles(apiKey, host) {
   });
 }
 
+async function deleteOldFiles(apiKey, host, thresholdTimestamp, jsonOutput = false) {
+  // Fetch all files
+  const result = await listFiles(apiKey, host);
+
+  if (result.files.length === 0) {
+    if (!jsonOutput) {
+      console.log('No files found.');
+    }
+    return { deletedCount: 0, files: [] };
+  }
+
+  // Filter files that haven't been accessed since threshold
+  const filesToDelete = result.files.filter(file => {
+    // If never accessed, include it
+    if (!file.lastAccessedAt) {
+      return true;
+    }
+    // Compare last accessed time with threshold
+    return new Date(file.lastAccessedAt) < new Date(thresholdTimestamp);
+  });
+
+  if (filesToDelete.length === 0) {
+    if (!jsonOutput) {
+      console.log('No files found matching the criteria.');
+    }
+    return { deletedCount: 0, files: [] };
+  }
+
+  // Display files to be deleted (same format as --list)
+  if (!jsonOutput) {
+    console.log(`\nFound ${filesToDelete.length} file(s) not accessed since ${new Date(thresholdTimestamp).toLocaleString()}:\n`);
+
+    const columns = [
+      { name: '#', alignment: 'right' },
+      { name: 'Group', alignment: 'left' },
+      { name: 'Path', alignment: 'left' },
+      { name: 'URL', alignment: 'left' },
+      { name: 'Size', alignment: 'right' },
+      { name: 'Last Accessed', alignment: 'right' }
+    ];
+
+    const table = new Table({ columns });
+
+    filesToDelete.forEach((file, index) => {
+      const lastAccessed = file.lastAccessedAt
+        ? new Date(file.lastAccessedAt).toLocaleString()
+        : 'Never';
+
+      // Format size with exactly 3 digits
+      let sizeStr;
+      const bytes = file.size;
+      const kb = bytes / 1024;
+      const mb = bytes / (1024 * 1024);
+      const gb = bytes / (1024 * 1024 * 1024);
+
+      if (kb < 1) {
+        sizeStr = `${kb.toFixed(2)} KB`;
+      } else if (kb < 10) {
+        sizeStr = `${kb.toFixed(2)} KB`;
+      } else if (kb < 100) {
+        sizeStr = `${kb.toFixed(1)} KB`;
+      } else if (kb < 1000) {
+        sizeStr = `${Math.round(kb)} KB`;
+      } else if (mb < 10) {
+        sizeStr = `${mb.toFixed(2)} MB`;
+      } else if (mb < 100) {
+        sizeStr = `${mb.toFixed(1)} MB`;
+      } else if (mb < 1000) {
+        sizeStr = `${Math.round(mb)} MB`;
+      } else if (gb < 10) {
+        sizeStr = `${gb.toFixed(2)} GB`;
+      } else if (gb < 100) {
+        sizeStr = `${gb.toFixed(1)} GB`;
+      } else {
+        sizeStr = `${Math.round(gb)} GB`;
+      }
+
+      const displayName = file.relativePath || file.originalName;
+      table.addRow({
+        '#': index + 1,
+        'Group': file.groupId || file.fileId,
+        'Path': displayName,
+        'URL': file.url,
+        'Size': sizeStr,
+        'Last Accessed': lastAccessed
+      });
+    });
+
+    table.printTable();
+  }
+
+  // Ask for confirmation
+  const readline = require('readline');
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout
+  });
+
+  return new Promise((resolve, reject) => {
+    rl.question(`\nDelete ${filesToDelete.length} file(s)? (yes/no): `, async (answer) => {
+      rl.close();
+
+      if (answer.toLowerCase() !== 'yes' && answer.toLowerCase() !== 'y') {
+        if (!jsonOutput) {
+          console.log('Deletion cancelled.');
+        }
+        resolve({ deletedCount: 0, files: [], cancelled: true });
+        return;
+      }
+
+      // Delete files one by one
+      let deletedCount = 0;
+      const deletedFiles = [];
+
+      for (const file of filesToDelete) {
+        try {
+          if (!jsonOutput) {
+            process.stdout.write(`Deleting ${file.fileId}... `);
+          }
+          await deleteFile(file.url, apiKey);
+          deletedCount++;
+          deletedFiles.push({ fileId: file.fileId, url: file.url });
+          if (!jsonOutput) {
+            console.log('done');
+          }
+        } catch (error) {
+          if (!jsonOutput) {
+            console.log(`failed: ${error.message}`);
+          }
+        }
+      }
+
+      if (!jsonOutput) {
+        console.log(`\nDeleted ${deletedCount} of ${filesToDelete.length} file(s).`);
+      }
+
+      resolve({ deletedCount, files: deletedFiles, total: filesToDelete.length });
+    });
+  });
+}
+
 async function main() {
   const options = parseArgs(process.argv);
+
+  // Validate --notAccessedSince is only used with --delete
+  if (options.notAccessedSince && !options.delete) {
+    if (options.json) {
+      console.log(JSON.stringify({ error: '--notAccessedSince must be used with --delete' }));
+    } else {
+      console.error('Error: --notAccessedSince must be used with --delete');
+      printUsage();
+    }
+    process.exit(1);
+  }
 
   if (options.list) {
     if (!options.apiKey) {
@@ -598,16 +783,6 @@ async function main() {
       process.exit(1);
     }
   } else if (options.delete) {
-    if (!options.deleteUrl) {
-      if (options.json) {
-        console.log(JSON.stringify({ error: 'No URL specified for deletion' }));
-      } else {
-        console.error('Error: No URL specified for deletion');
-        printUsage();
-      }
-      process.exit(1);
-    }
-
     if (!options.apiKey) {
       if (options.json) {
         console.log(JSON.stringify({ error: 'No API key provided. Use -key option or set PB_API_KEY environment variable.' }));
@@ -617,28 +792,58 @@ async function main() {
       process.exit(1);
     }
 
-    try {
-      if (!options.json) {
-        console.log(`Deleting ${options.deleteUrl}...`);
+    // Handle --notAccessedSince with --delete
+    if (options.notAccessedSince) {
+      try {
+        const thresholdTimestamp = parseThresholdTimestamp(options.notAccessedSince);
+        const result = await deleteOldFiles(options.apiKey, options.host, thresholdTimestamp, options.json);
+
+        if (options.json) {
+          console.log(JSON.stringify(result));
+        }
+      } catch (error) {
+        if (options.json) {
+          console.log(JSON.stringify({ error: error.message }));
+        } else {
+          console.error(`\\nError: ${error.message}`);
+        }
+        process.exit(1);
       }
-      const result = await deleteFile(options.deleteUrl, options.apiKey);
-      if (options.json) {
-        console.log(JSON.stringify(result));
-      } else if (result.deletedCount) {
-        console.log(`\\nSuccess! Folder deleted.`);
-        console.log(`Folder ID: ${result.fileId}`);
-        console.log(`Files removed: ${result.deletedCount}`);
-      } else {
-        console.log(`\\nSuccess! File deleted.`);
-        console.log(`File ID: ${result.fileId}`);
+    } else {
+      // Handle single file deletion by URL
+      if (!options.deleteUrl) {
+        if (options.json) {
+          console.log(JSON.stringify({ error: 'No URL specified for deletion' }));
+        } else {
+          console.error('Error: No URL specified for deletion');
+          printUsage();
+        }
+        process.exit(1);
       }
-    } catch (error) {
-      if (options.json) {
-        console.log(JSON.stringify({ error: error.message }));
-      } else {
-        console.error(`\\nError: ${error.message}`);
+
+      try {
+        if (!options.json) {
+          console.log(`Deleting ${options.deleteUrl}...`);
+        }
+        const result = await deleteFile(options.deleteUrl, options.apiKey);
+        if (options.json) {
+          console.log(JSON.stringify(result));
+        } else if (result.deletedCount) {
+          console.log(`\\nSuccess! Folder deleted.`);
+          console.log(`Folder ID: ${result.fileId}`);
+          console.log(`Files removed: ${result.deletedCount}`);
+        } else {
+          console.log(`\\nSuccess! File deleted.`);
+          console.log(`File ID: ${result.fileId}`);
+        }
+      } catch (error) {
+        if (options.json) {
+          console.log(JSON.stringify({ error: error.message }));
+        } else {
+          console.error(`\\nError: ${error.message}`);
+        }
+        process.exit(1);
       }
-      process.exit(1);
     }
   } else {
     if (!options.file) {
