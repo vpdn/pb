@@ -59,7 +59,7 @@ describe('Security Tests', () => {
 
       const response = await worker.fetch(request, env as any, ctx);
 
-      expect(handleServe).toHaveBeenCalledWith(longId, env.DB, env.R2_BUCKET);
+      expect(handleServe).toHaveBeenCalledWith(longId, env.DB, env.R2_BUCKET, 'https://example.com');
     });
 
     it('should handle URLs with many query parameters', async () => {
@@ -76,7 +76,7 @@ describe('Security Tests', () => {
 
       const response = await worker.fetch(request, env as any, ctx);
 
-      expect(handleServe).toHaveBeenCalledWith('test123', env.DB, env.R2_BUCKET);
+      expect(handleServe).toHaveBeenCalledWith('test123', env.DB, env.R2_BUCKET, 'https://example.com');
     });
   });
 
@@ -192,7 +192,7 @@ describe('Security Tests', () => {
 
       await worker.fetch(request, env as any, ctx);
 
-      expect(handleServe).toHaveBeenCalledWith(fileId, env.DB, env.R2_BUCKET);
+      expect(handleServe).toHaveBeenCalledWith(fileId, env.DB, env.R2_BUCKET, 'https://example.com');
     });
 
     it('should handle special characters in file IDs', async () => {
@@ -215,6 +215,14 @@ describe('Security Tests', () => {
       }
 
       expect(handleServe).toHaveBeenCalledTimes(specialIds.length);
+      specialIds.forEach((id, index) => {
+        expect(vi.mocked(handleServe).mock.calls[index]).toEqual([
+          encodeURIComponent(id),
+          env.DB,
+          env.R2_BUCKET,
+          'https://example.com'
+        ]);
+      });
     });
   });
 });

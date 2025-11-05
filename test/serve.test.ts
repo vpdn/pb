@@ -5,6 +5,7 @@ import { createMockD1Database, createMockR2Bucket } from './mocks';
 describe('Serve Handler', () => {
   let mockDb: ReturnType<typeof createMockD1Database>;
   let mockBucket: ReturnType<typeof createMockR2Bucket>;
+  const baseUrl = 'https://example.com';
 
   beforeEach(() => {
     mockDb = createMockD1Database();
@@ -30,7 +31,8 @@ describe('Serve Handler', () => {
       const response = await handleServe(
         'test_file_123',
         mockDb as any,
-        mockBucket as any
+        mockBucket as any,
+        baseUrl
       );
 
       expect(response.status).toBe(200);
@@ -52,7 +54,8 @@ describe('Serve Handler', () => {
       const response = await handleServe(
         'nonexistent_file',
         mockDb as any,
-        mockBucket as any
+        mockBucket as any,
+        baseUrl
       );
 
       expect(response.status).toBe(404);
@@ -74,7 +77,8 @@ describe('Serve Handler', () => {
       const response = await handleServe(
         'test_file_123',
         mockDb as any,
-        mockBucket as any
+        mockBucket as any,
+        baseUrl
       );
 
       expect(response.status).toBe(404);
@@ -98,7 +102,8 @@ describe('Serve Handler', () => {
       const response = await handleServe(
         'test_file_123',
         mockDb as any,
-        mockBucket as any
+        mockBucket as any,
+        baseUrl
       );
 
       expect(response.status).toBe(200);
@@ -121,7 +126,8 @@ describe('Serve Handler', () => {
       const response = await handleServe(
         'test_file_123',
         mockDb as any,
-        mockBucket as any
+        mockBucket as any,
+        baseUrl
       );
 
       expect(response.status).toBe(200);
@@ -140,7 +146,8 @@ describe('Serve Handler', () => {
       const response = await handleServe(
         'test_file_123',
         mockDb as any,
-        mockBucket as any
+        mockBucket as any,
+        baseUrl
       );
 
       expect(response.status).toBe(500);
@@ -169,7 +176,8 @@ describe('Serve Handler', () => {
       const response = await handleServe(
         'test_file_123',
         mockDb as any,
-        mockBucket as any
+        mockBucket as any,
+        baseUrl
       );
 
       expect(response.status).toBe(500);
@@ -178,6 +186,72 @@ describe('Serve Handler', () => {
       expect(consoleSpy).toHaveBeenCalled();
 
       consoleSpy.mockRestore();
+    });
+
+    it('should render directory listings when a folder ID is requested', async () => {
+      mockDb._setMockResult('first', null);
+      mockDb._setMockResult('all', {
+        success: true,
+        results: [
+          {
+            file_id: 'group123/folder/index.txt',
+            original_name: 'index.txt',
+            relative_path: 'folder/index.txt',
+            size: 12,
+            expires_at: null
+          },
+          {
+            file_id: 'group123/folder/notes.md',
+            original_name: 'notes.md',
+            relative_path: 'folder/notes.md',
+            size: 24,
+            expires_at: null
+          }
+        ]
+      });
+
+      const response = await handleServe(
+        'group123',
+        mockDb as any,
+        mockBucket as any,
+        baseUrl
+      );
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get('Content-Type')).toBe('text/html; charset=utf-8');
+      expect(mockBucket.get).not.toHaveBeenCalled();
+
+      const html = await response.text();
+      expect(html).toContain('Directory listing for <code>group123</code>');
+      expect(html).toContain('href="https://example.com/f/group123/folder/index.txt"');
+      expect(html).toContain('folder/notes.md');
+    });
+
+    it('should return 410 for expired directory listings', async () => {
+      const expiresAt = new Date(Date.now() - 60_000).toISOString();
+      mockDb._setMockResult('first', null);
+      mockDb._setMockResult('all', {
+        success: true,
+        results: [
+          {
+            file_id: 'group123/file.txt',
+            original_name: 'file.txt',
+            relative_path: 'file.txt',
+            size: 10,
+            expires_at: expiresAt
+          }
+        ]
+      });
+
+      const response = await handleServe(
+        'group123',
+        mockDb as any,
+        mockBucket as any,
+        baseUrl
+      );
+
+      expect(response.status).toBe(410);
+      expect(await response.text()).toBe('File has expired');
     });
   });
 });
