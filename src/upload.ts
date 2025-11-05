@@ -42,7 +42,7 @@ function stripTrailingSlash(url: string): string {
 }
 
 const ISO_8601_UTC_REGEX = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/;
-const MAX_EXPIRATION_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+const MAX_EXPIRATION_MS = 365 * 24 * 60 * 60 * 1000; // 365 days
 
 function normalizeExpiration(expiresAtRaw: string): string {
   const trimmed = expiresAtRaw.trim();
@@ -68,7 +68,7 @@ function normalizeExpiration(expiresAtRaw: string): string {
   }
 
   if (expiresAtMs - now > MAX_EXPIRATION_MS) {
-    throw new Error('Expiration must be within 30 days');
+    throw new Error('Expiration must be within 365 days');
   }
 
   return parsed.toISOString();

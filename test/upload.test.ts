@@ -174,6 +174,32 @@ describe('Upload Handler', () => {
       expect(bindCalls[0][7]).toBe(futureIso);
     });
 
+    it('should allow expires_at up to one year in the future', async () => {
+      const oneYearFuture = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000 - 60 * 60 * 1000).toISOString();
+      const formData = createMockFormData(
+        [{ name: 'test.pdf', content: 'file content', type: 'application/pdf' }],
+        { expiresAt: oneYearFuture }
+      );
+
+      const request = new Request('https://example.com/upload', {
+        method: 'POST',
+        body: formData
+      });
+
+      const response = await handleUpload(
+        request,
+        mockDb as any,
+        mockBucket as any,
+        mockApiKey,
+        'https://example.com'
+      );
+
+      const body = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(body.expiresAt).toBe(oneYearFuture);
+    });
+
     it('should reject invalid expires_at timestamps', async () => {
       const formData = createMockFormData(
         [{ name: 'test.pdf', content: 'file content', type: 'application/pdf' }],
@@ -226,7 +252,7 @@ describe('Upload Handler', () => {
     });
 
     it('should reject expires_at timestamps beyond the maximum allowed window', async () => {
-      const futureIso = new Date(Date.now() + 31 * 24 * 60 * 60 * 1000).toISOString();
+      const futureIso = new Date(Date.now() + 366 * 24 * 60 * 60 * 1000).toISOString();
       const formData = createMockFormData(
         [{ name: 'test.pdf', content: 'file content', type: 'application/pdf' }],
         { expiresAt: futureIso }
@@ -248,7 +274,7 @@ describe('Upload Handler', () => {
       const responseData = await response.json();
 
       expect(response.status).toBe(400);
-      expect(responseData).toEqual({ error: 'Expiration must be within 30 days' });
+      expect(responseData).toEqual({ error: 'Expiration must be within 365 days' });
     });
 
     it('should handle upload errors gracefully', async () => {

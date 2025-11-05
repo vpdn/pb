@@ -599,68 +599,36 @@ async function deleteOldFiles(apiKey, host, thresholdTimestamp, jsonOutput = fal
     return { deletedCount: 0, files: [] };
   }
 
-  // Display files to be deleted (same format as --list)
+  // Display files to be deleted
   if (!jsonOutput) {
     console.log(`\nFound ${filesToDelete.length} file(s) not accessed since ${new Date(thresholdTimestamp).toLocaleString()}:\n`);
 
-    // Helper to truncate showing tail of path
-    const truncateTail = (str, maxLen) => {
-      if (!str || str.length <= maxLen) return str;
-      return '…' + str.slice(-(maxLen - 1));
-    };
-
-    // Fixed 80 column layout: # (3) + Group (10) + Path (25) + Size (8) + Last Accessed (16) = ~62 + borders
-    const table = new Table({
-      head: ['#', 'Group', 'Path', 'Size', 'Last Accessed'],
-      colWidths: [3, 10, 25, 8, 16],
-      style: { head: ['cyan'] }
-    });
-
     filesToDelete.forEach((file, index) => {
+      const displayName = file.relativePath || file.originalName;
+
+      // Format uploaded date
+      const uploadedDate = new Date(file.uploadedAt);
+      const uploaded = uploadedDate.toLocaleString();
+
+      // Format last accessed
       const lastAccessed = file.lastAccessedAt
         ? new Date(file.lastAccessedAt).toLocaleString()
         : 'Never';
 
-      // Format size with exactly 3 digits
-      let sizeStr;
-      const bytes = file.size;
-      const kb = bytes / 1024;
-      const mb = bytes / (1024 * 1024);
-      const gb = bytes / (1024 * 1024 * 1024);
+      // Format expires
+      const expires = file.expiresAt
+        ? new Date(file.expiresAt).toLocaleString()
+        : 'Never';
 
-      if (kb < 1) {
-        sizeStr = `${kb.toFixed(2)} KB`;
-      } else if (kb < 10) {
-        sizeStr = `${kb.toFixed(2)} KB`;
-      } else if (kb < 100) {
-        sizeStr = `${kb.toFixed(1)} KB`;
-      } else if (kb < 1000) {
-        sizeStr = `${Math.round(kb)} KB`;
-      } else if (mb < 10) {
-        sizeStr = `${mb.toFixed(2)} MB`;
-      } else if (mb < 100) {
-        sizeStr = `${mb.toFixed(1)} MB`;
-      } else if (mb < 1000) {
-        sizeStr = `${Math.round(mb)} MB`;
-      } else if (gb < 10) {
-        sizeStr = `${gb.toFixed(2)} GB`;
-      } else if (gb < 100) {
-        sizeStr = `${gb.toFixed(1)} GB`;
-      } else {
-        sizeStr = `${Math.round(gb)} GB`;
+      console.log(`${index + 1}. ${displayName}`);
+      console.log(`   Group: ${file.groupId || file.fileId} | Size: ${formatBytes(file.size)} | Accessed: ${file.accessCount || 0} times`);
+      console.log(`   URL: ${file.url}`);
+      console.log(`   Uploaded: ${uploaded} | Last accessed: ${lastAccessed}`);
+      if (file.expiresAt) {
+        console.log(`   Expires: ${expires}`);
       }
-
-      const displayName = file.relativePath || file.originalName;
-      table.push([
-        index + 1,
-        truncateTail(file.groupId || file.fileId, 10),
-        truncateTail(displayName, 25),
-        sizeStr,
-        lastAccessed.length > 16 ? lastAccessed.slice(0, 16) : lastAccessed
-      ]);
+      console.log();
     });
-
-    console.log(table.toString());
   }
 
   // Ask for confirmation
@@ -755,70 +723,32 @@ async function main() {
 
       console.log(`\\nFound ${result.files.length} file(s):\\n`);
 
-      // Helper to truncate showing tail of path
-      const truncateTail = (str, maxLen) => {
-        if (!str || str.length <= maxLen) return str;
-        return '…' + str.slice(-(maxLen - 1));
-      };
-
-      // Fixed 80 column layout: # (3) + Group (10) + Path (28) + Size (8) + Uploaded (19) = ~68 + borders
-      const table = new Table({
-        head: ['#', 'Group', 'Path', 'Size', 'Uploaded'],
-        colWidths: [3, 10, 28, 8, 19],
-        style: { head: ['cyan'] }
-      });
-      
       result.files.forEach((file, index) => {
-        const date = new Date(file.uploadedAt);
-        const year = date.getFullYear();
-        const month = String(date.getMonth() + 1).padStart(2, '0');
-        const day = String(date.getDate()).padStart(2, '0');
-        const hours = String(date.getHours()).padStart(2, '0');
-        const minutes = String(date.getMinutes()).padStart(2, '0');
-        const seconds = String(date.getSeconds()).padStart(2, '0');
-        const uploadDate = `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
-        
-        // Format size with exactly 3 digits
-        let sizeStr;
-        const bytes = file.size;
-        const kb = bytes / 1024;
-        const mb = bytes / (1024 * 1024);
-        const gb = bytes / (1024 * 1024 * 1024);
-        
-        if (kb < 1) {
-          // Show small bytes as KB with 2 decimals
-          sizeStr = `${kb.toFixed(2)} KB`;
-        } else if (kb < 10) {
-          sizeStr = `${kb.toFixed(2)} KB`;
-        } else if (kb < 100) {
-          sizeStr = `${kb.toFixed(1)} KB`;
-        } else if (kb < 1000) {
-          sizeStr = `${Math.round(kb)} KB`;
-        } else if (mb < 10) {
-          sizeStr = `${mb.toFixed(2)} MB`;
-        } else if (mb < 100) {
-          sizeStr = `${mb.toFixed(1)} MB`;
-        } else if (mb < 1000) {
-          sizeStr = `${Math.round(mb)} MB`;
-        } else if (gb < 10) {
-          sizeStr = `${gb.toFixed(2)} GB`;
-        } else if (gb < 100) {
-          sizeStr = `${gb.toFixed(1)} GB`;
-        } else {
-          sizeStr = `${Math.round(gb)} GB`;
-        }
-        
         const displayName = file.relativePath || file.originalName;
-        table.push([
-          index + 1,
-          truncateTail(file.groupId || file.fileId, 10),
-          truncateTail(displayName, 28),
-          sizeStr,
-          uploadDate
-        ]);
-      });
 
-      console.log(table.toString());
+        // Format uploaded date
+        const uploadedDate = new Date(file.uploadedAt);
+        const uploaded = uploadedDate.toLocaleString();
+
+        // Format last accessed
+        const lastAccessed = file.lastAccessedAt
+          ? new Date(file.lastAccessedAt).toLocaleString()
+          : 'Never';
+
+        // Format expires
+        const expires = file.expiresAt
+          ? new Date(file.expiresAt).toLocaleString()
+          : 'Never';
+
+        console.log(`${index + 1}. ${displayName}`);
+        console.log(`   Group: ${file.groupId || file.fileId} | Size: ${formatBytes(file.size)} | Accessed: ${file.accessCount || 0} times`);
+        console.log(`   URL: ${file.url}`);
+        console.log(`   Uploaded: ${uploaded} | Last accessed: ${lastAccessed}`);
+        if (file.expiresAt) {
+          console.log(`   Expires: ${expires}`);
+        }
+        console.log();
+      });
     } catch (error) {
       if (options.json) {
         console.log(JSON.stringify({ error: error.message }));
