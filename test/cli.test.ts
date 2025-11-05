@@ -61,7 +61,8 @@ describe('CLI Tests', () => {
         deleteUrl: null,
         list: false,
         json: false,
-        expiresAfter: null
+        expiresAfter: null,
+        recursive: false
       });
     });
 
@@ -79,7 +80,8 @@ describe('CLI Tests', () => {
         deleteUrl: 'https://example.com/f/abc123',
         list: false,
         json: false,
-        expiresAfter: null
+        expiresAfter: null,
+        recursive: false
       });
     });
 
@@ -128,12 +130,77 @@ describe('CLI Tests', () => {
         deleteUrl: null,
         list: true,
         json: false,
-        expiresAfter: null
+        expiresAfter: null,
+        recursive: false
       });
+    });
+
+    it('should enable recursive uploads when flag is provided', async () => {
+      const { parseArgs } = await import('../cli/pb.js');
+
+      const args = ['node', 'pb.js', 'folder', '--recursive', '-key', 'pb_test123'];
+      const options = parseArgs(args);
+
+      expect(options.recursive).toBe(true);
+
+      const shortArgs = ['node', 'pb.js', 'folder', '-R', '-key', 'pb_test123'];
+      const shortOptions = parseArgs(shortArgs);
+
+      expect(shortOptions.recursive).toBe(true);
     });
   });
 
   describe('File Operations', () => {
+    function setupDirectoryFsMocks() {
+      const rootPath = path.join('my-folder');
+      const file1 = path.join(rootPath, 'file1.txt');
+      const subDir = path.join(rootPath, 'sub');
+      const file2 = path.join(subDir, 'file2.txt');
+
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+      vi.mocked(fs.statSync).mockImplementation((targetPath: any) => {
+        switch (targetPath) {
+          case rootPath:
+            return { isFile: () => false, isDirectory: () => true } as any;
+          case file1:
+            return { isFile: () => true, isDirectory: () => false, size: 5 } as any;
+          case subDir:
+            return { isFile: () => false, isDirectory: () => true } as any;
+          case file2:
+            return { isFile: () => true, isDirectory: () => false, size: 6 } as any;
+          default:
+            throw new Error(`Unexpected statSync call: ${targetPath}`);
+        }
+      });
+
+      vi.mocked(fs.readdirSync).mockImplementation((dir: any) => {
+        if (dir === rootPath) {
+          return [
+            { name: 'file1.txt', isDirectory: () => false, isFile: () => true },
+            { name: 'sub', isDirectory: () => true, isFile: () => false }
+          ] as any;
+        }
+        if (dir === subDir) {
+          return [
+            { name: 'file2.txt', isDirectory: () => false, isFile: () => true }
+          ] as any;
+        }
+        throw new Error(`Unexpected readdirSync call: ${dir}`);
+      });
+
+      vi.mocked(fs.readFileSync).mockImplementation((targetPath: any) => {
+        if (targetPath === file1) {
+          return Buffer.from('file1');
+        }
+        if (targetPath === file2) {
+          return Buffer.from('file-2');
+        }
+        throw new Error(`Unexpected readFileSync call: ${targetPath}`);
+      });
+
+      return { rootPath, file1, subDir, file2 };
+    }
+
     it('should validate file existence before upload', async () => {
       vi.mocked(fs.existsSync).mockReturnValue(false);
       
@@ -200,52 +267,8 @@ describe('CLI Tests', () => {
       });
     });
 
-    it('should upload directory contents with preserved paths', async () => {
-      const rootPath = path.join('my-folder');
-      const file1 = path.join(rootPath, 'file1.txt');
-      const subDir = path.join(rootPath, 'sub');
-      const file2 = path.join(subDir, 'file2.txt');
-
-      vi.mocked(fs.existsSync).mockReturnValue(true);
-      vi.mocked(fs.statSync).mockImplementation((targetPath: any) => {
-        switch (targetPath) {
-          case rootPath:
-            return { isFile: () => false, isDirectory: () => true } as any;
-          case file1:
-            return { isFile: () => true, isDirectory: () => false, size: 5 } as any;
-          case subDir:
-            return { isFile: () => false, isDirectory: () => true } as any;
-          case file2:
-            return { isFile: () => true, isDirectory: () => false, size: 6 } as any;
-          default:
-            throw new Error(`Unexpected statSync call: ${targetPath}`);
-        }
-      });
-
-      vi.mocked(fs.readdirSync).mockImplementation((dir: any) => {
-        if (dir === rootPath) {
-          return [
-            { name: 'file1.txt', isDirectory: () => false, isFile: () => true },
-            { name: 'sub', isDirectory: () => true, isFile: () => false }
-          ] as any;
-        }
-        if (dir === subDir) {
-          return [
-            { name: 'file2.txt', isDirectory: () => false, isFile: () => true }
-          ] as any;
-        }
-        throw new Error(`Unexpected readdirSync call: ${dir}`);
-      });
-
-      vi.mocked(fs.readFileSync).mockImplementation((targetPath: any) => {
-        if (targetPath === file1) {
-          return Buffer.from('file1');
-        }
-        if (targetPath === file2) {
-          return Buffer.from('file-2');
-        }
-        throw new Error(`Unexpected readFileSync call: ${targetPath}`);
-      });
+    it('should skip subdirectories when recursive flag is not provided', async () => {
+      const { rootPath } = setupDirectoryFsMocks();
 
       const capturedChunks: Buffer[] = [];
 
@@ -277,6 +300,47 @@ describe('CLI Tests', () => {
       const { uploadFile } = await import('../cli/pb.js');
 
       await uploadFile(rootPath, 'pb_test123', 'https://example.com');
+
+      const payload = Buffer.concat(capturedChunks).toString('utf-8');
+      expect(payload).toContain('filename="file1.txt"');
+      expect(payload).not.toContain('filename="sub/file2.txt"');
+      expect(payload).toContain('Content-Disposition: form-data; name="directory_upload"');
+      expect(mockReq.end).toHaveBeenCalled();
+    });
+
+    it('should upload directory contents recursively when enabled', async () => {
+      const { rootPath } = setupDirectoryFsMocks();
+
+      const capturedChunks: Buffer[] = [];
+
+      const mockResponse = {
+        statusCode: 200,
+        on: vi.fn((event, callback) => {
+          if (event === 'data') {
+            callback('{"url":"https://example.com/f/folder","fileId":"folder","size":11,"isDirectory":true}');
+          } else if (event === 'end') {
+            callback();
+          }
+        })
+      };
+
+      const mockReq = {
+        on: vi.fn(),
+        write: vi.fn((chunk: Buffer) => {
+          capturedChunks.push(chunk);
+          return true;
+        }),
+        end: vi.fn()
+      };
+
+      mockRequest.mockImplementation((options, callback) => {
+        callback(mockResponse);
+        return mockReq;
+      });
+
+      const { uploadFile } = await import('../cli/pb.js');
+
+      await uploadFile(rootPath, 'pb_test123', 'https://example.com', null, true);
 
       const payload = Buffer.concat(capturedChunks).toString('utf-8');
       expect(payload).toContain('filename="file1.txt"');

@@ -151,8 +151,10 @@ curl -X POST \
 pb screenshot.png
 pb document.pdf
 cat config.json | pb
-# Upload an entire directory (structure is preserved under a shared prefix)
+# Upload files in a directory (top level only)
 pb ./static-site
+# Upload a directory recursively (structure is preserved under a shared prefix)
+pb ./static-site --recursive
 
 # List all your files
 pb --list
@@ -174,6 +176,8 @@ pb temp.txt --expiresAfter 24h
 # Upload with expiration (file expires in 7 days)
 pb document.pdf --expiresAfter 7d
 ```
+
+Use `-R` as shorthand for `--recursive` when including subdirectories in a folder upload.
 
 ### File Expiration
 

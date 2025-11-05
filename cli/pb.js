@@ -72,13 +72,15 @@ function toPosixPath(filePath) {
   return filePath.split(path.sep).join('/');
 }
 
-function walkDirectory(root, current, files) {
+function walkDirectory(root, current, files, recursive) {
   const entries = fs.readdirSync(current, { withFileTypes: true });
 
   entries.forEach((entry) => {
     const absolutePath = path.join(current, entry.name);
     if (entry.isDirectory()) {
-      walkDirectory(root, absolutePath, files);
+      if (recursive) {
+        walkDirectory(root, absolutePath, files, recursive);
+      }
     } else if (entry.isFile()) {
       const relativePath = path.relative(root, absolutePath);
       files.push({
@@ -91,7 +93,7 @@ function walkDirectory(root, current, files) {
   });
 }
 
-function collectFilesForUpload(targetPath) {
+function collectFilesForUpload(targetPath, recursive = false) {
   const stats = fs.statSync(targetPath);
 
   if (stats.isFile()) {
@@ -109,7 +111,7 @@ function collectFilesForUpload(targetPath) {
 
   if (stats.isDirectory()) {
     const files = [];
-    walkDirectory(targetPath, targetPath, files);
+    walkDirectory(targetPath, targetPath, files, recursive);
 
     files.sort((a, b) => a.relativePath.localeCompare(b.relativePath));
 
@@ -166,6 +168,7 @@ Options:
   -h, --host <host>      Server host (default: ${DEFAULT_HOST})
   --delete               Delete a file by URL
   --list                 List all files uploaded with your API key
+  --recursive, -R        Include subdirectories when uploading folders
   --json                 Output results in JSON format
   --expiresAfter <time>  Set file expiration (e.g., 30m, 24h, 7d, 1w)
   --help                 Show this help message
@@ -173,7 +176,7 @@ Options:
 Examples:
   pb ./image.png
   pb ./document.pdf -key PB_API_KEY
-  pb ./my-site/ -key PB_API_KEY
+  pb ./my-site/ --recursive -key PB_API_KEY
   PB_API_KEY=PB_API_KEY pb ./file.txt
   pb --delete https://pb.nxh.ch/f/abc123 -key PB_API_KEY
   pb --list -key PB_API_KEY
@@ -192,7 +195,8 @@ function parseArgs(args) {
     deleteUrl: null,
     list: false,
     json: false,
-    expiresAfter: null
+    expiresAfter: null,
+    recursive: false
   };
 
   for (let i = 2; i < args.length; i++) {
@@ -201,7 +205,7 @@ function parseArgs(args) {
     if (arg === '--help') {
       printUsage();
       process.exit(0);
-    } else if (arg === '-key') {
+    } else if (arg === '-key' || arg === '-k') {
       options.apiKey = args[++i];
     } else if (arg === '-h' || arg === '--host') {
       options.host = args[++i];
@@ -210,6 +214,8 @@ function parseArgs(args) {
       options.deleteUrl = args[++i];
     } else if (arg === '--list') {
       options.list = true;
+    } else if (arg === '--recursive' || arg === '-R') {
+      options.recursive = true;
     } else if (arg === '--json') {
       options.json = true;
     } else if (arg === '--expiresAfter') {
@@ -222,15 +228,18 @@ function parseArgs(args) {
   return options;
 }
 
-async function uploadFile(filePath, apiKey, host, expiresAt = null) {
+async function uploadFile(filePath, apiKey, host, expiresAt = null, recursive = false) {
   if (!fs.existsSync(filePath)) {
     throw new Error(`File not found: ${filePath}`);
   }
 
-  const { isDirectory, files } = collectFilesForUpload(filePath);
+  const { isDirectory, files } = collectFilesForUpload(filePath, recursive);
 
   if (isDirectory && files.length === 0) {
-    throw new Error(`Directory is empty: ${filePath}`);
+    const message = recursive
+      ? `Directory is empty: ${filePath}`
+      : `Directory has no files at this level. Use --recursive to include subdirectories: ${filePath}`;
+    throw new Error(message);
   }
 
   const boundary = '----FormBoundary' + Math.random().toString(36).substr(2);
@@ -675,7 +684,7 @@ async function main() {
           console.log(`Uploading ${options.file}...`);
         }
       }
-      const result = await uploadFile(options.file, options.apiKey, options.host, expiresAt);
+      const result = await uploadFile(options.file, options.apiKey, options.host, expiresAt, options.recursive);
       if (options.json) {
         console.log(JSON.stringify(result));
       } else if (result.isDirectory) {
