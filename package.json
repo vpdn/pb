@@ -34,7 +34,7 @@
 		"pb": "./cli/pb.js"
 	},
 	"dependencies": {
-		"console-table-printer": "^2.14.3",
+		"cli-table3": "^0.6.5",
 		"nanoid": "^5.0.4"
 	},
 	"devDependencies": {

@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const https = require('https');
 const { URL } = require('url');
-const { Table } = require('console-table-printer');
+const Table = require('cli-table3');
 
 const DEFAULT_HOST = 'https://pb.nxh.ch';
 
@@ -546,24 +546,20 @@ async function deleteOldFiles(apiKey, host, thresholdTimestamp, jsonOutput = fal
     console.log(`\nFound ${filesToDelete.length} file(s) not accessed since ${new Date(thresholdTimestamp).toLocaleString()}:\n`);
 
     // Calculate column widths based on terminal size
-    const terminalWidth = process.stdout.columns || 120; // fallback to 120 if not available
-    const fixedWidth = 3 + 8 + 22; // # + Size + Last Accessed (with padding/borders)
-    const remainingWidth = Math.max(50, terminalWidth - fixedWidth - 20); // min 50, subtract borders/padding
+    const terminalWidth = process.stdout.columns || 120;
+    const fixedWidth = 35; // borders, padding, fixed columns
+    const availableWidth = Math.max(70, terminalWidth - fixedWidth);
 
-    // Distribute remaining width: Group (25%), Path (75%)
-    const groupWidth = Math.max(10, Math.floor(remainingWidth * 0.25));
-    const pathWidth = Math.max(30, Math.floor(remainingWidth * 0.75));
+    // Distribute: # (5), Group (25%), Path (70%), Size (8), Last Accessed (22)
+    const groupWidth = Math.max(12, Math.floor(availableWidth * 0.25));
+    const pathWidth = Math.max(30, Math.floor(availableWidth * 0.70));
 
-    // maxLen causes text to wrap into multiple lines
-    const columns = [
-      { name: '#', alignment: 'right' },
-      { name: 'Group', alignment: 'left', maxLen: groupWidth },
-      { name: 'Path', alignment: 'left', maxLen: pathWidth },
-      { name: 'Size', alignment: 'right' },
-      { name: 'Last Accessed', alignment: 'right' }
-    ];
-
-    const table = new Table({ columns });
+    const table = new Table({
+      head: ['#', 'Group', 'Path', 'Size', 'Last Accessed'],
+      colWidths: [5, groupWidth, pathWidth, 10, 24],
+      wordWrap: true,
+      style: { head: ['cyan'] }
+    });
 
     filesToDelete.forEach((file, index) => {
       const lastAccessed = file.lastAccessedAt
@@ -600,16 +596,16 @@ async function deleteOldFiles(apiKey, host, thresholdTimestamp, jsonOutput = fal
       }
 
       const displayName = file.relativePath || file.originalName;
-      table.addRow({
-        '#': index + 1,
-        'Group': file.groupId || file.fileId,
-        'Path': displayName,
-        'Size': sizeStr,
-        'Last Accessed': lastAccessed
-      });
+      table.push([
+        index + 1,
+        file.groupId || file.fileId,
+        displayName,
+        sizeStr,
+        lastAccessed
+      ]);
     });
 
-    table.printTable();
+    console.log(table.toString());
   }
 
   // Ask for confirmation
@@ -705,33 +701,33 @@ async function main() {
       console.log(`\\nFound ${result.files.length} file(s):\\n`);
 
       // Calculate column widths based on terminal size
-      const terminalWidth = process.stdout.columns || 120; // fallback to 120 if not available
-      const fixedWidth = 3 + 8 + 19; // # + Size + Uploaded (with padding/borders)
-      const remainingWidth = Math.max(60, terminalWidth - fixedWidth - 20); // min 60, subtract borders/padding
+      const terminalWidth = process.stdout.columns || 120;
+      const fixedWidth = 30; // borders, padding, fixed columns
+      const availableWidth = Math.max(80, terminalWidth - fixedWidth);
 
-      // Distribute remaining width: Group (15%), Path (60%), Type (25%)
-      const groupWidth = Math.max(10, Math.floor(remainingWidth * 0.15));
-      const pathWidth = Math.max(30, Math.floor(remainingWidth * 0.60));
-      const typeWidth = Math.max(15, Math.floor(remainingWidth * 0.25));
+      // Distribute: # (5), Group (15%), Path (60%), Size (8), Type (20%), Uploaded (19)
+      const groupWidth = Math.max(12, Math.floor(availableWidth * 0.15));
+      const pathWidth = Math.max(30, Math.floor(availableWidth * 0.60));
+      const typeWidth = Math.max(15, Math.floor(availableWidth * 0.20));
 
-      // Create table with console-table-printer
-      // maxLen causes text to wrap into multiple lines
-      const columns = [
-        { name: '#', alignment: 'right' },
-        { name: 'Group', alignment: 'left', maxLen: groupWidth },
-        { name: 'Path', alignment: 'left', maxLen: pathWidth },
-        { name: 'Size', alignment: 'right' },
-        { name: 'Type', alignment: 'left', maxLen: typeWidth },
-        { name: 'Uploaded', alignment: 'right' }
-      ];
-      
-      // Add expiration column if any file has expiration
+      // Check if any file has expiration
       const hasExpiration = result.files.some(file => file.expiresAt);
+
+      // Create table headers with cli-table3
+      const headers = ['#', 'Group', 'Path', 'Size', 'Type', 'Uploaded'];
+      const colWidths = [5, groupWidth, pathWidth, 10, typeWidth, 21];
+
       if (hasExpiration) {
-        columns.push({ name: 'Expires', alignment: 'right' });
+        headers.push('Expires');
+        colWidths.push(20);
       }
-      
-      const table = new Table({ columns });
+
+      const table = new Table({
+        head: headers,
+        colWidths: colWidths,
+        wordWrap: true,
+        style: { head: ['cyan'] }
+      });
       
       result.files.forEach((file, index) => {
         const date = new Date(file.uploadedAt);
@@ -774,23 +770,23 @@ async function main() {
         }
         
         const displayName = file.relativePath || file.originalName;
-        const row = {
-          '#': index + 1,
-          'Group': file.groupId || file.fileId,
-          'Path': displayName,
-          'Size': sizeStr,
-          'Type': file.contentType || 'unknown',
-          'Uploaded': uploadDate
-        };
-        
+        const row = [
+          index + 1,
+          file.groupId || file.fileId,
+          displayName,
+          sizeStr,
+          file.contentType || 'unknown',
+          uploadDate
+        ];
+
         if (hasExpiration) {
-          row['Expires'] = file.remainingTime || '-';
+          row.push(file.remainingTime || '-');
         }
-        
-        table.addRow(row);
+
+        table.push(row);
       });
-      
-      table.printTable();
+
+      console.log(table.toString());
     } catch (error) {
       if (options.json) {
         console.log(JSON.stringify({ error: error.message }));

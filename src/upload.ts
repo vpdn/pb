@@ -41,6 +41,39 @@ function stripTrailingSlash(url: string): string {
   return url.endsWith('/') ? url.slice(0, -1) : url;
 }
 
+const ISO_8601_UTC_REGEX = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/;
+const MAX_EXPIRATION_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+
+function normalizeExpiration(expiresAtRaw: string): string {
+  const trimmed = expiresAtRaw.trim();
+
+  if (!trimmed) {
+    throw new Error('Invalid expires_at timestamp');
+  }
+
+  if (!ISO_8601_UTC_REGEX.test(trimmed)) {
+    throw new Error('Invalid expires_at timestamp');
+  }
+
+  const parsed = new Date(trimmed);
+  if (!Number.isFinite(parsed.getTime())) {
+    throw new Error('Invalid expires_at timestamp');
+  }
+
+  const now = Date.now();
+  const expiresAtMs = parsed.getTime();
+
+  if (expiresAtMs <= now) {
+    throw new Error('Expiration must be in the future');
+  }
+
+  if (expiresAtMs - now > MAX_EXPIRATION_MS) {
+    throw new Error('Expiration must be within 30 days');
+  }
+
+  return parsed.toISOString();
+}
+
 export async function handleUpload(
   request: Request,
   db: D1Database,
@@ -52,7 +85,7 @@ export async function handleUpload(
     const formData = await request.formData();
     const files = formData.getAll('file').filter((file): file is File => file instanceof File);
     const expiresAtRaw = formData.get('expires_at');
-    const expiresAt = typeof expiresAtRaw === 'string' ? expiresAtRaw : null;
+    let expiresAt: string | null = null;
     const directoryFlag = formData.get('directory_upload') === 'true';
 
     if (!files.length) {
@@ -60,6 +93,18 @@ export async function handleUpload(
         status: 400,
         headers: { 'Content-Type': 'application/json' }
       });
+    }
+
+    if (typeof expiresAtRaw === 'string' && expiresAtRaw.trim()) {
+      try {
+        expiresAt = normalizeExpiration(expiresAtRaw);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Invalid expires_at timestamp';
+        return new Response(JSON.stringify({ error: message }), {
+          status: 400,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
     }
 
     const baseId = nanoid(12);
