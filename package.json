@@ -1,6 +1,6 @@
 {
 	"name": "@vpdn/pb-sharelink",
-	"version": "0.1.0",
+	"version": "0.1.1",
 	"description": "A lightweight, serverless file upload and sharing service built on Cloudflare Workers",
 	"author": "vpdn",
 	"license": "MIT",
@@ -9,7 +9,13 @@
 		"url": "https://github.com/vpdn/pb.git"
 	},
 	"homepage": "https://github.com/vpdn/pb#readme",
-	"keywords": ["file-sharing", "pastebin", "cloudflare", "cli", "upload"],
+	"keywords": [
+		"file-sharing",
+		"pastebin",
+		"cloudflare",
+		"cli",
+		"upload"
+	],
 	"files": [
 		"cli/",
 		"README.md",
