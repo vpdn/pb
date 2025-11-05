@@ -38,7 +38,9 @@ describe('Serve Handler', () => {
       expect(response.status).toBe(200);
       expect(response.headers.get('Content-Type')).toBe('application/pdf');
       expect(response.headers.get('Content-Length')).toBe('1024');
-      expect(response.headers.get('Content-Disposition')).toBe('inline; filename="document.pdf"');
+      expect(response.headers.get('Content-Disposition')).toBe(
+        "inline; filename=\"document.pdf\"; filename*=UTF-8''document.pdf"
+      );
       expect(response.headers.get('Cache-Control')).toBe('public, max-age=31536000');
 
       // Verify database query
@@ -132,8 +134,36 @@ describe('Serve Handler', () => {
 
       expect(response.status).toBe(200);
       expect(response.headers.get('Content-Disposition')).toBe(
-        'inline; filename="file with spaces & special.pdf"'
+        "inline; filename=\"file with spaces & special.pdf\"; filename*=UTF-8''file%20with%20spaces%20%26%20special.pdf"
       );
+    });
+
+    it('should encode filenames with quotes and newlines to prevent header injection', async () => {
+      const mockUpload = {
+        file_id: 'evil_file_456',
+        original_name: 'bad"\r\nSet-Cookie: attack.txt',
+        content_type: 'text/plain',
+        size: 128
+      };
+
+      mockDb._setMockResult('first', mockUpload);
+
+      const fileContent = new ArrayBuffer(128);
+      await mockBucket.put('evil_file_456', fileContent);
+
+      const response = await handleServe(
+        'evil_file_456',
+        mockDb as any,
+        mockBucket as any,
+        baseUrl
+      );
+
+      expect(response.status).toBe(200);
+      const header = response.headers.get('Content-Disposition');
+      expect(header).toBe(
+        "inline; filename=\"bad' Set-Cookie: attack.txt\"; filename*=UTF-8''bad%22%0D%0ASet-Cookie%3A%20attack.txt"
+      );
+      expect(header).not.toMatch(/[\r\n]/);
     });
 
     it('should handle database errors gracefully', async () => {

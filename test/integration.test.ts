@@ -50,6 +50,7 @@ describe('Integration Tests - Upload and Retrieval Flow', () => {
       
       // Verify upload was successful
       expect(uploadResponse.status).toBe(200);
+      expect(uploadResponse.headers.get('Access-Control-Allow-Origin')).toBe('*');
       
       const uploadData = await uploadResponse.json();
       expect(uploadData).toEqual({
@@ -109,11 +110,49 @@ describe('Integration Tests - Upload and Retrieval Flow', () => {
       expect(retrieveResponse.status).toBe(200);
       expect(retrieveResponse.headers.get('Content-Type')).toBe('text/plain');
       expect(retrieveResponse.headers.get('Content-Length')).toBe(fileContent.length.toString());
-      expect(retrieveResponse.headers.get('Content-Disposition')).toBe('inline; filename="test-document.txt"');
+      expect(retrieveResponse.headers.get('Content-Disposition')).toBe(
+        "inline; filename=\"test-document.txt\"; filename*=UTF-8''test-document.txt"
+      );
       expect(retrieveResponse.headers.get('Cache-Control')).toBe('public, max-age=31536000');
+      expect(retrieveResponse.headers.get('Access-Control-Allow-Origin')).toBe('*');
 
       // Verify the correct file was requested from R2
       expect(env.R2_BUCKET.get).toHaveBeenCalledWith('test_file_123');
+    });
+
+    it('should include CORS headers on list responses', async () => {
+      const filesResult = {
+        success: true,
+        results: [
+          {
+            file_id: 'test_file_123',
+            group_id: 'test_file_123',
+            original_name: 'test-document.txt',
+            relative_path: null,
+            size: 123,
+            content_type: 'text/plain',
+            uploaded_at: '2024-01-01T00:00:00Z',
+            last_accessed_at: null,
+            access_count: 0,
+            expires_at: null
+          }
+        ]
+      };
+
+      env.DB._setMockResult('all', filesResult);
+
+      const listRequest = new Request('https://example.com/list', {
+        method: 'GET',
+        headers: { 'Authorization': 'Bearer pb_test123' }
+      });
+
+      const listResponse = await worker.fetch(listRequest, env as any, ctx);
+      expect(listResponse.status).toBe(200);
+      expect(listResponse.headers.get('Access-Control-Allow-Origin')).toBe('*');
+
+      const listData = await listResponse.json();
+      expect(listData.files).toHaveLength(1);
+      expect(listData.files[0].url).toBe('https://example.com/f/test_file_123');
     });
 
 
@@ -171,6 +210,7 @@ describe('Integration Tests - Upload and Retrieval Flow', () => {
       const deleteResponse = await worker.fetch(deleteRequest, env as any, ctx);
 
       expect(deleteResponse.status).toBe(404);
+      expect(deleteResponse.headers.get('Access-Control-Allow-Origin')).toBe('*');
       const deleteData = await deleteResponse.json();
       expect(deleteData).toEqual({ error: 'File not found or access denied' });
     });
@@ -190,6 +230,7 @@ describe('Integration Tests - Upload and Retrieval Flow', () => {
 
       const uploadResponse = await worker.fetch(uploadRequest, env as any, ctx);
       expect(uploadResponse.status).toBe(200);
+      expect(uploadResponse.headers.get('Access-Control-Allow-Origin')).toBe('*');
 
       const uploadData = await uploadResponse.json();
       const fileId = uploadData.fileId;
@@ -226,6 +267,7 @@ describe('Integration Tests - Upload and Retrieval Flow', () => {
 
       const deleteResponse = await worker.fetch(deleteRequest, env as any, ctx);
       expect(deleteResponse.status).toBe(200);
+      expect(deleteResponse.headers.get('Access-Control-Allow-Origin')).toBe('*');
 
       const deleteData = await deleteResponse.json();
       expect(deleteData).toEqual({

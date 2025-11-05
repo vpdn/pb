@@ -81,6 +81,19 @@ describe('Main Worker', () => {
       expect(response).toBe(mockResponse);
     });
 
+    it('should decode URL-encoded file IDs before serving', async () => {
+      const mockResponse = new Response('file content');
+      vi.mocked(handleServe).mockResolvedValue(mockResponse);
+
+      const request = new Request('https://example.com/f/folder%2Ffile%20name.txt', {
+        method: 'GET'
+      });
+
+      await worker.fetch(request, env as any, ctx);
+
+      expect(handleServe).toHaveBeenCalledWith('folder/file name.txt', env.DB, env.R2_BUCKET, 'https://example.com');
+    });
+
     it('should return 400 for missing file ID', async () => {
       const request = new Request('https://example.com/f/', {
         method: 'GET'
@@ -171,6 +184,35 @@ describe('Main Worker', () => {
       expect(response.status).toBe(405);
       const text = await response.text();
       expect(text).toBe('Method not allowed');
+    });
+  });
+
+  describe('Base URL resolution', () => {
+    it('should use configured PUBLIC_BASE_URL when provided', async () => {
+      env = createMockEnv({ PUBLIC_BASE_URL: 'https://cdn.example.net/app' });
+      const mockResponse = new Response('file content');
+      vi.mocked(handleServe).mockResolvedValue(mockResponse);
+
+      const request = new Request('https://example.com/f/test123', {
+        method: 'GET'
+      });
+
+      await worker.fetch(request, env as any, ctx);
+
+      expect(handleServe).toHaveBeenCalledWith('test123', env.DB, env.R2_BUCKET, 'https://cdn.example.net/app');
+    });
+
+    it('should fall back to request origin on workers.dev domains', async () => {
+      const mockResponse = new Response('file content');
+      vi.mocked(handleServe).mockResolvedValue(mockResponse);
+
+      const request = new Request('https://pb-example.workers.dev/f/test123', {
+        method: 'GET'
+      });
+
+      await worker.fetch(request, env as any, ctx);
+
+      expect(handleServe).toHaveBeenCalledWith('test123', env.DB, env.R2_BUCKET, 'https://pb-example.workers.dev');
     });
   });
 

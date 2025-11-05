@@ -100,11 +100,15 @@ export function createMockFormData(
   return formData;
 }
 
-export function createMockEnv() {
+export function createMockEnv(overrides: Partial<{
+  PUBLIC_BASE_URL: string;
+  BASE_URL: string;
+}> = {}) {
   return {
     DB: createMockD1Database(),
     R2_BUCKET: createMockR2Bucket(),
-    JWT_SECRET: 'test-secret'
+    JWT_SECRET: 'test-secret',
+    ...overrides
   };
 }
 
@@ -113,4 +117,25 @@ export function createMockExecutionContext(): ExecutionContext {
     waitUntil: vi.fn(),
     passThroughOnException: vi.fn()
   };
+}
+
+export function buildExpectedContentDisposition(
+  filename: string,
+  disposition: 'inline' | 'attachment' = 'inline'
+): string {
+  const sanitized = filename
+    .replace(/[\r\n]+/g, ' ')
+    .replace(/"/g, "'")
+    .replace(/\\/g, '_')
+    .replace(/[^\x20-\x7E]/g, '_')
+    .trim();
+
+  const fallback = sanitized ? (sanitized.length > 150 ? sanitized.slice(0, 150) : sanitized) : 'download';
+
+  const encoded = encodeURIComponent(filename)
+    .replace(/\*/g, '%2A')
+    .replace(/%(7C|60|5E)/gi, match => match.toUpperCase());
+
+  const encodedPart = encoded ? `; filename*=UTF-8''${encoded}` : '';
+  return `${disposition}; filename="${fallback}"${encodedPart}`;
 }

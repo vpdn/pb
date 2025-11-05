@@ -545,11 +545,20 @@ async function deleteOldFiles(apiKey, host, thresholdTimestamp, jsonOutput = fal
   if (!jsonOutput) {
     console.log(`\nFound ${filesToDelete.length} file(s) not accessed since ${new Date(thresholdTimestamp).toLocaleString()}:\n`);
 
+    // Calculate column widths based on terminal size
+    const terminalWidth = process.stdout.columns || 120; // fallback to 120 if not available
+    const fixedWidth = 3 + 8 + 22; // # + Size + Last Accessed (with padding/borders)
+    const remainingWidth = Math.max(50, terminalWidth - fixedWidth - 20); // min 50, subtract borders/padding
+
+    // Distribute remaining width: Group (25%), Path (75%)
+    const groupWidth = Math.max(10, Math.floor(remainingWidth * 0.25));
+    const pathWidth = Math.max(30, Math.floor(remainingWidth * 0.75));
+
+    // maxLen causes text to wrap into multiple lines
     const columns = [
       { name: '#', alignment: 'right' },
-      { name: 'Group', alignment: 'left' },
-      { name: 'Path', alignment: 'left' },
-      { name: 'URL', alignment: 'left' },
+      { name: 'Group', alignment: 'left', maxLen: groupWidth },
+      { name: 'Path', alignment: 'left', maxLen: pathWidth },
       { name: 'Size', alignment: 'right' },
       { name: 'Last Accessed', alignment: 'right' }
     ];
@@ -595,7 +604,6 @@ async function deleteOldFiles(apiKey, host, thresholdTimestamp, jsonOutput = fal
         '#': index + 1,
         'Group': file.groupId || file.fileId,
         'Path': displayName,
-        'URL': file.url,
         'Size': sizeStr,
         'Last Accessed': lastAccessed
       });
@@ -695,15 +703,25 @@ async function main() {
       }
 
       console.log(`\\nFound ${result.files.length} file(s):\\n`);
-      
+
+      // Calculate column widths based on terminal size
+      const terminalWidth = process.stdout.columns || 120; // fallback to 120 if not available
+      const fixedWidth = 3 + 8 + 19; // # + Size + Uploaded (with padding/borders)
+      const remainingWidth = Math.max(60, terminalWidth - fixedWidth - 20); // min 60, subtract borders/padding
+
+      // Distribute remaining width: Group (15%), Path (60%), Type (25%)
+      const groupWidth = Math.max(10, Math.floor(remainingWidth * 0.15));
+      const pathWidth = Math.max(30, Math.floor(remainingWidth * 0.60));
+      const typeWidth = Math.max(15, Math.floor(remainingWidth * 0.25));
+
       // Create table with console-table-printer
+      // maxLen causes text to wrap into multiple lines
       const columns = [
         { name: '#', alignment: 'right' },
-        { name: 'Group', alignment: 'left' },
-        { name: 'Path', alignment: 'left' },
-        { name: 'URL', alignment: 'left' },
+        { name: 'Group', alignment: 'left', maxLen: groupWidth },
+        { name: 'Path', alignment: 'left', maxLen: pathWidth },
         { name: 'Size', alignment: 'right' },
-        { name: 'Type', alignment: 'left' },
+        { name: 'Type', alignment: 'left', maxLen: typeWidth },
         { name: 'Uploaded', alignment: 'right' }
       ];
       
@@ -760,7 +778,6 @@ async function main() {
           '#': index + 1,
           'Group': file.groupId || file.fileId,
           'Path': displayName,
-          'URL': file.url,
           'Size': sizeStr,
           'Type': file.contentType || 'unknown',
           'Uploaded': uploadDate

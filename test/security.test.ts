@@ -183,8 +183,9 @@ describe('Security Tests', () => {
 
   describe('URL encoding edge cases', () => {
     it('should handle double-encoded URLs', async () => {
-      const fileId = encodeURIComponent(encodeURIComponent('test file.pdf'));
-      const request = new Request(`https://example.com/f/${fileId}`, {
+      const originalFileId = 'test file.pdf';
+      const doubleEncodedFileId = encodeURIComponent(encodeURIComponent(originalFileId));
+      const request = new Request(`https://example.com/f/${doubleEncodedFileId}`, {
         method: 'GET'
       });
 
@@ -192,7 +193,8 @@ describe('Security Tests', () => {
 
       await worker.fetch(request, env as any, ctx);
 
-      expect(handleServe).toHaveBeenCalledWith(fileId, env.DB, env.R2_BUCKET, 'https://example.com');
+      // Should decode once (from URL) to get the single-encoded version
+      expect(handleServe).toHaveBeenCalledWith(encodeURIComponent(originalFileId), env.DB, env.R2_BUCKET, 'https://example.com');
     });
 
     it('should handle special characters in file IDs', async () => {
@@ -216,8 +218,9 @@ describe('Security Tests', () => {
 
       expect(handleServe).toHaveBeenCalledTimes(specialIds.length);
       specialIds.forEach((id, index) => {
+        // After decoding the URL, we should get back the original id
         expect(vi.mocked(handleServe).mock.calls[index]).toEqual([
-          encodeURIComponent(id),
+          id,
           env.DB,
           env.R2_BUCKET,
           'https://example.com'

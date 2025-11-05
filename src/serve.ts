@@ -67,6 +67,34 @@ function formatBytes(bytes: number | null | undefined): string {
   return `${size.toFixed(precision)} ${units[unitIndex]}`;
 }
 
+function encodeRFC5987Value(value: string): string {
+  return encodeURIComponent(value)
+    .replace(/\*/g, '%2A')
+    .replace(/%(7C|60|5E)/g, (match) => match.toUpperCase());
+}
+
+function sanitizeFilenameForHeader(filename: string): string {
+  const sanitized = filename
+    .replace(/[\r\n]+/g, ' ')
+    .replace(/"/g, "'")
+    .replace(/\\/g, '_')
+    .replace(/[^\x20-\x7E]/g, '_')
+    .trim();
+
+  if (!sanitized) {
+    return 'download';
+  }
+
+  return sanitized.length > 150 ? sanitized.slice(0, 150) : sanitized;
+}
+
+function buildContentDisposition(dispositionType: 'inline' | 'attachment', filename: string): string {
+  const fallback = sanitizeFilenameForHeader(filename);
+  const encoded = encodeRFC5987Value(filename);
+  const encodedPart = encoded ? `; filename*=UTF-8''${encoded}` : '';
+  return `${dispositionType}; filename="${fallback}"${encodedPart}`;
+}
+
 export async function handleServe(
   fileId: string,
   db: D1Database,
@@ -201,11 +229,8 @@ export async function handleServe(
     headers.set('Cache-Control', 'public, max-age=31536000');
     
     // Set Content-Disposition based on file type for better browser handling
-    if (shouldDisplayInline(contentType)) {
-      headers.set('Content-Disposition', `inline; filename="${upload.original_name}"`);
-    } else {
-      headers.set('Content-Disposition', `attachment; filename="${upload.original_name}"`);
-    }
+    const dispositionType = shouldDisplayInline(contentType) ? 'inline' : 'attachment';
+    headers.set('Content-Disposition', buildContentDisposition(dispositionType, upload.original_name));
     
     return new Response(object.body, {
       status: 200,

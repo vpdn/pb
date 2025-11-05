@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { handleUpload } from '../src/upload';
 import { handleServe } from '../src/serve';
 import { validateApiKey } from '../src/auth';
-import { createMockD1Database, createMockR2Bucket } from './mocks';
+import { createMockD1Database, createMockR2Bucket, buildExpectedContentDisposition } from './mocks';
 
 // Mock nanoid
 vi.mock('nanoid', () => ({
@@ -131,7 +131,8 @@ describe('Performance Tests', () => {
 
       expect(response.status).toBe(200);
       expect(response.headers.get('Content-Length')).toBe('104857600');
-      expect(response.headers.get('Content-Disposition')).toContain(largeFileName);
+      const expectedDisposition = buildExpectedContentDisposition(largeFileName, 'attachment');
+      expect(response.headers.get('Content-Disposition')).toBe(expectedDisposition);
     });
   });
 

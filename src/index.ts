@@ -8,12 +8,50 @@ import { cleanupExpiredFiles } from './cleanup';
 export interface Env {
   DB: D1Database;
   R2_BUCKET: R2Bucket;
+  PUBLIC_BASE_URL?: string;
+  BASE_URL?: string;
+}
+
+function stripTrailingSlash(value: string): string {
+  return value.endsWith('/') ? value.slice(0, -1) : value;
+}
+
+function resolveConfiguredBaseUrl(env: Env): string | null {
+  const candidate = (env.PUBLIC_BASE_URL ?? env.BASE_URL ?? '').trim();
+  if (!candidate) {
+    return null;
+  }
+
+  try {
+    const parsed = new URL(candidate);
+    return stripTrailingSlash(parsed.toString());
+  } catch {
+    return stripTrailingSlash(candidate);
+  }
+}
+
+function resolveBaseUrl(request: Request, env: Env): string {
+  const configured = resolveConfiguredBaseUrl(env);
+  if (configured) {
+    return configured;
+  }
+
+  const url = new URL(request.url);
+  return stripTrailingSlash(url.origin);
+}
+
+function applyCorsHeaders(response: Response, corsHeaders: Record<string, string>): Response {
+  const headers = response.headers;
+  for (const [key, value] of Object.entries(corsHeaders)) {
+    headers.set(key, value);
+  }
+  return response;
 }
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
-    const normalizedBaseUrl = url.hostname.includes('workers.dev') ? 'https://pb.nxh.ch' : url.origin;
+    const resolvedBaseUrl = resolveBaseUrl(request, env);
     
     // CORS headers
     const corsHeaders = {
@@ -29,14 +67,18 @@ export default {
 
     // Handle file operations
     if (url.pathname.startsWith('/f/')) {
-      const fileId = url.pathname.split('/f/')[1];
-      if (!fileId) {
+      const rawFileId = url.pathname.split('/f/')[1];
+      if (!rawFileId) {
         return new Response('File ID required', { status: 400 });
       }
 
+      // Decode the fileId to handle special characters and spaces
+      const fileId = decodeURIComponent(rawFileId);
+
       // Serve files (GET)
       if (request.method === 'GET') {
-        return handleServe(fileId, env.DB, env.R2_BUCKET, normalizedBaseUrl);
+        const response = await handleServe(fileId, env.DB, env.R2_BUCKET, resolvedBaseUrl);
+        return applyCorsHeaders(response, corsHeaders);
       }
 
       // Delete files (DELETE)
@@ -59,7 +101,8 @@ export default {
           });
         }
 
-        return handleDelete(fileId, env.DB, env.R2_BUCKET, validKey);
+        const response = await handleDelete(fileId, env.DB, env.R2_BUCKET, validKey);
+        return applyCorsHeaders(response, corsHeaders);
       }
 
       // Method not allowed for /f/ endpoints
@@ -90,7 +133,8 @@ export default {
       }
 
       // Use custom domain if available, otherwise use request origin
-      return handleUpload(request, env.DB, env.R2_BUCKET, validKey, normalizedBaseUrl);
+      const response = await handleUpload(request, env.DB, env.R2_BUCKET, validKey, resolvedBaseUrl);
+      return applyCorsHeaders(response, corsHeaders);
     }
 
     // Handle list files
@@ -113,7 +157,8 @@ export default {
         });
       }
 
-      return handleList(env.DB, validKey, normalizedBaseUrl);
+      const response = await handleList(env.DB, validKey, resolvedBaseUrl);
+      return applyCorsHeaders(response, corsHeaders);
     }
 
     // Default response

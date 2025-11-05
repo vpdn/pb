@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import worker from '../src/index';
-import { createMockEnv, createMockExecutionContext, createMockFormData } from './mocks';
+import { createMockEnv, createMockExecutionContext, createMockFormData, buildExpectedContentDisposition } from './mocks';
 
 // Mock nanoid with predictable sequence
 let fileIdCounter = 0;
@@ -308,9 +308,8 @@ describe('End-to-End Tests - Complete File Lifecycle', () => {
 
         const retrieveResponse = await worker.fetch(retrieveRequest, env as any, ctx);
         expect(retrieveResponse.status).toBe(200);
-        expect(retrieveResponse.headers.get('Content-Disposition')).toBe(
-          `inline; filename="${uploadedFile.originalName}"`
-        );
+        const expectedDisposition = buildExpectedContentDisposition(uploadedFile.originalName, 'inline');
+        expect(retrieveResponse.headers.get('Content-Disposition')).toBe(expectedDisposition);
       }
 
       // Batch delete - remove all files
