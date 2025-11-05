@@ -181,6 +181,42 @@ function createProgressBar(current, total, width = 30) {
   return `[${bar}] ${percentage}% ${formatBytes(current)}/${formatBytes(total)}`;
 }
 
+function sanitizeMultipartValue(value) {
+  const sanitized = value
+    .replace(/\r/g, ' ')
+    .replace(/\n/g, ' ')
+    .replace(/"/g, '\\"');
+
+  return sanitized.length > 0 ? sanitized : 'file';
+}
+
+function sanitizeFieldValue(value) {
+  return String(value)
+    .replace(/\r/g, ' ')
+    .replace(/\n/g, ' ')
+    .trim();
+}
+
+function encodeFilenameRFC5987(filename) {
+  return encodeURIComponent(filename)
+    .replace(/\*/g, '%2A')
+    .replace(/%(7C|60|5E)/g, match => match.toUpperCase());
+}
+
+function buildFilePartHeader(boundary, file) {
+  const sanitizedFilename = sanitizeMultipartValue(file.relativePath);
+  const encodedFilename = encodeFilenameRFC5987(file.relativePath);
+
+  return `--${boundary}\r\n` +
+    `Content-Disposition: form-data; name="file"; filename="${sanitizedFilename}"; filename*=UTF-8''${encodedFilename}\r\n` +
+    `Content-Type: ${file.contentType}\r\n\r\n`;
+}
+
+function buildFieldPart(boundary, name, value) {
+  const sanitizedValue = sanitizeFieldValue(value);
+  return `--${boundary}\r\nContent-Disposition: form-data; name="${name}"\r\n\r\n${sanitizedValue}\r\n`;
+}
+
 function printUsage() {
   console.log(`
 Usage: pb <file> [options]
@@ -276,39 +312,30 @@ async function uploadFile(filePath, apiKey, host, expiresAt = null, recursive = 
   }
 
   const boundary = '----FormBoundary' + Math.random().toString(36).substr(2);
-  const formDataParts = [];
+  const closingBoundary = `--${boundary}--\r\n`;
 
-  files.forEach((file) => {
-    const fileBuffer = fs.readFileSync(file.absolutePath);
-    formDataParts.push(
-      Buffer.from(`--${boundary}\r\n`),
-      Buffer.from(`Content-Disposition: form-data; name="file"; filename="${file.relativePath}"\r\n`),
-      Buffer.from(`Content-Type: ${file.contentType}\r\n\r\n`),
-      fileBuffer,
-      Buffer.from(`\r\n`)
-    );
-  });
+  const fileHeaders = files.map(file => buildFilePartHeader(boundary, file));
+  const fieldParts = [];
 
   if (expiresAt) {
-    formDataParts.push(
-      Buffer.from(`--${boundary}\r\n`),
-      Buffer.from(`Content-Disposition: form-data; name="expires_at"\r\n\r\n`),
-      Buffer.from(expiresAt),
-      Buffer.from(`\r\n`)
-    );
+    fieldParts.push(buildFieldPart(boundary, 'expires_at', expiresAt));
   }
 
   if (isDirectory) {
-    formDataParts.push(
-      Buffer.from(`--${boundary}\r\n`),
-      Buffer.from(`Content-Disposition: form-data; name="directory_upload"\r\n\r\n`),
-      Buffer.from('true'),
-      Buffer.from(`\r\n`)
-    );
+    fieldParts.push(buildFieldPart(boundary, 'directory_upload', 'true'));
   }
 
-  formDataParts.push(Buffer.from(`--${boundary}--\r\n`));
-  const formData = Buffer.concat(formDataParts);
+  let totalBytes = Buffer.byteLength(closingBoundary);
+
+  files.forEach((file, index) => {
+    totalBytes += Buffer.byteLength(fileHeaders[index]);
+    totalBytes += file.size;
+    totalBytes += Buffer.byteLength('\r\n');
+  });
+
+  fieldParts.forEach(part => {
+    totalBytes += Buffer.byteLength(part);
+  });
 
   const url = new URL('/upload', host);
   
@@ -321,14 +348,15 @@ async function uploadFile(filePath, apiKey, host, expiresAt = null, recursive = 
       headers: {
         'Authorization': `Bearer ${apiKey}`,
         'Content-Type': `multipart/form-data; boundary=${boundary}`,
-        'Content-Length': formData.length
+        'Content-Length': totalBytes
       }
     };
 
     const protocol = url.protocol === 'https:' ? https : require('http');
     
-    // Show file size only for larger files
-    const showProgress = formData.length > 1024 * 1024; // Show progress for payloads > 1MB
+    // Show progress only for larger payloads
+    const showProgress = totalBytes > 1024 * 1024; // 1MB threshold
+    let uploadedBytes = 0;
     
     const req = protocol.request(options, (res) => {
       let data = '';
@@ -362,45 +390,75 @@ async function uploadFile(filePath, apiKey, host, expiresAt = null, recursive = 
     });
 
     req.on('error', reject);
-    
+
     if (showProgress) {
-      // Write data in chunks to show progress
-      const chunkSize = 65536; // 64KB chunks
-      let offset = 0;
-      let uploadedBytes = 0;
-      const totalBytes = formData.length;
-      
-      // Show initial progress
       process.stdout.write(`Uploading: ${createProgressBar(0, totalBytes)}\r`);
-      
-      function writeNextChunk() {
-        if (offset >= formData.length) {
-          req.end();
-          return;
-        }
-        
-        const chunk = formData.slice(offset, Math.min(offset + chunkSize, formData.length));
-        const canContinue = req.write(chunk);
-        
-        offset += chunk.length;
-        uploadedBytes = offset;
-        
-        // Update progress bar
-        process.stdout.write(`Uploading: ${createProgressBar(uploadedBytes, totalBytes)}\r`);
-        
-        if (canContinue) {
-          setImmediate(writeNextChunk);
-        } else {
-          req.once('drain', writeNextChunk);
-        }
-      }
-      
-      writeNextChunk();
-    } else {
-      // For small files, just write at once
-      req.write(formData);
-      req.end();
     }
+
+    const updateProgress = (bytes) => {
+      if (!showProgress) return;
+      uploadedBytes = Math.min(uploadedBytes + bytes, totalBytes);
+      process.stdout.write(`Uploading: ${createProgressBar(uploadedBytes, totalBytes)}\r`);
+    };
+
+    const writeChunk = (chunk) => {
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      updateProgress(buffer.length);
+      return new Promise((resolveWrite, rejectWrite) => {
+        const onError = (error) => {
+          req.removeListener('error', onError);
+          rejectWrite(error);
+        };
+
+        req.on('error', onError);
+        const canContinue = req.write(buffer, (err) => {
+          req.removeListener('error', onError);
+          if (err) {
+            rejectWrite(err);
+            return;
+          }
+          if (canContinue) {
+            resolveWrite();
+          }
+        });
+
+        if (!canContinue) {
+          req.once('drain', () => {
+            req.removeListener('error', onError);
+            resolveWrite();
+          });
+        }
+      });
+    };
+
+    const writeString = (value) => writeChunk(Buffer.from(value, 'utf8'));
+
+    const streamFile = async (file) => {
+      const stream = fs.createReadStream(file.absolutePath);
+
+      for await (const chunk of stream) {
+        await writeChunk(chunk);
+      }
+    };
+
+    (async () => {
+      try {
+        for (let i = 0; i < files.length; i++) {
+          await writeString(fileHeaders[i]);
+          await streamFile(files[i]);
+          await writeString('\r\n');
+        }
+
+        for (const part of fieldParts) {
+          await writeString(part);
+        }
+
+        await writeString(closingBoundary);
+        req.end();
+      } catch (error) {
+        req.destroy(error);
+      }
+    })();
   });
 }
 
@@ -545,19 +603,16 @@ async function deleteOldFiles(apiKey, host, thresholdTimestamp, jsonOutput = fal
   if (!jsonOutput) {
     console.log(`\nFound ${filesToDelete.length} file(s) not accessed since ${new Date(thresholdTimestamp).toLocaleString()}:\n`);
 
-    // Calculate column widths based on terminal size
-    const terminalWidth = process.stdout.columns || 120;
-    const fixedWidth = 35; // borders, padding, fixed columns
-    const availableWidth = Math.max(70, terminalWidth - fixedWidth);
+    // Helper to truncate showing tail of path
+    const truncateTail = (str, maxLen) => {
+      if (!str || str.length <= maxLen) return str;
+      return '…' + str.slice(-(maxLen - 1));
+    };
 
-    // Distribute: # (5), Group (25%), Path (70%), Size (8), Last Accessed (22)
-    const groupWidth = Math.max(12, Math.floor(availableWidth * 0.25));
-    const pathWidth = Math.max(30, Math.floor(availableWidth * 0.70));
-
+    // Fixed 80 column layout: # (3) + Group (10) + Path (25) + Size (8) + Last Accessed (16) = ~62 + borders
     const table = new Table({
       head: ['#', 'Group', 'Path', 'Size', 'Last Accessed'],
-      colWidths: [5, groupWidth, pathWidth, 10, 24],
-      wordWrap: true,
+      colWidths: [3, 10, 25, 8, 16],
       style: { head: ['cyan'] }
     });
 
@@ -598,10 +653,10 @@ async function deleteOldFiles(apiKey, host, thresholdTimestamp, jsonOutput = fal
       const displayName = file.relativePath || file.originalName;
       table.push([
         index + 1,
-        file.groupId || file.fileId,
-        displayName,
+        truncateTail(file.groupId || file.fileId, 10),
+        truncateTail(displayName, 25),
         sizeStr,
-        lastAccessed
+        lastAccessed.length > 16 ? lastAccessed.slice(0, 16) : lastAccessed
       ]);
     });
 
@@ -700,32 +755,16 @@ async function main() {
 
       console.log(`\\nFound ${result.files.length} file(s):\\n`);
 
-      // Calculate column widths based on terminal size
-      const terminalWidth = process.stdout.columns || 120;
-      const fixedWidth = 30; // borders, padding, fixed columns
-      const availableWidth = Math.max(80, terminalWidth - fixedWidth);
+      // Helper to truncate showing tail of path
+      const truncateTail = (str, maxLen) => {
+        if (!str || str.length <= maxLen) return str;
+        return '…' + str.slice(-(maxLen - 1));
+      };
 
-      // Distribute: # (5), Group (15%), Path (60%), Size (8), Type (20%), Uploaded (19)
-      const groupWidth = Math.max(12, Math.floor(availableWidth * 0.15));
-      const pathWidth = Math.max(30, Math.floor(availableWidth * 0.60));
-      const typeWidth = Math.max(15, Math.floor(availableWidth * 0.20));
-
-      // Check if any file has expiration
-      const hasExpiration = result.files.some(file => file.expiresAt);
-
-      // Create table headers with cli-table3
-      const headers = ['#', 'Group', 'Path', 'Size', 'Type', 'Uploaded'];
-      const colWidths = [5, groupWidth, pathWidth, 10, typeWidth, 21];
-
-      if (hasExpiration) {
-        headers.push('Expires');
-        colWidths.push(20);
-      }
-
+      // Fixed 80 column layout: # (3) + Group (10) + Path (28) + Size (8) + Uploaded (19) = ~68 + borders
       const table = new Table({
-        head: headers,
-        colWidths: colWidths,
-        wordWrap: true,
+        head: ['#', 'Group', 'Path', 'Size', 'Uploaded'],
+        colWidths: [3, 10, 28, 8, 19],
         style: { head: ['cyan'] }
       });
       
@@ -770,20 +809,13 @@ async function main() {
         }
         
         const displayName = file.relativePath || file.originalName;
-        const row = [
+        table.push([
           index + 1,
-          file.groupId || file.fileId,
-          displayName,
+          truncateTail(file.groupId || file.fileId, 10),
+          truncateTail(displayName, 28),
           sizeStr,
-          file.contentType || 'unknown',
           uploadDate
-        ];
-
-        if (hasExpiration) {
-          row.push(file.remainingTime || '-');
-        }
-
-        table.push(row);
+        ]);
       });
 
       console.log(table.toString());
