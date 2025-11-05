@@ -12,6 +12,7 @@ vi.mock('nanoid', () => ({
 describe('Performance Tests', () => {
   let mockDb: ReturnType<typeof createMockD1Database>;
   let mockBucket: ReturnType<typeof createMockR2Bucket>;
+  const baseUrl = 'https://example.com';
 
   beforeEach(() => {
     mockDb = createMockD1Database();
@@ -94,7 +95,7 @@ describe('Performance Tests', () => {
       });
 
       const servePromises = files.map(file => 
-        handleServe(file.file_id, mockDb as any, mockBucket as any)
+        handleServe(file.file_id, mockDb as any, mockBucket as any, baseUrl)
       );
 
       const responses = await Promise.all(servePromises);
@@ -124,7 +125,8 @@ describe('Performance Tests', () => {
       const response = await handleServe(
         'large_file_123',
         mockDb as any,
-        mockBucket as any
+        mockBucket as any,
+        baseUrl
       );
 
       expect(response.status).toBe(200);
@@ -231,7 +233,8 @@ describe('Performance Tests', () => {
       const response = await handleServe(
         'test_123',
         mockDb as any,
-        mockBucket as any
+        mockBucket as any,
+        baseUrl
       );
 
       const endTime = Date.now();

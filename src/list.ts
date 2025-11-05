@@ -1,4 +1,18 @@
-export async function handleList(db: D1Database, apiKey: { id: number; key: string }): Promise<Response> {
+import type { D1Database } from '@cloudflare/workers-types';
+import type { ApiKey } from './auth';
+
+function stripTrailingSlash(url: string): string {
+  return url.endsWith('/') ? url.slice(0, -1) : url;
+}
+
+function encodeFileIdForUrl(fileId: string): string {
+  return fileId
+    .split('/')
+    .map(segment => encodeURIComponent(segment))
+    .join('/');
+}
+
+export async function handleList(db: D1Database, apiKey: ApiKey, baseUrl: string): Promise<Response> {
   try {
     // Query uploads table for files uploaded by this API key
     const result = await db.prepare(`
@@ -26,8 +40,10 @@ export async function handleList(db: D1Database, apiKey: { id: number; key: stri
     }
 
     // Format the results to include file URLs
+    const normalizedBaseUrl = stripTrailingSlash(baseUrl);
+
     const files = result.results.map((file: any) => {
-      const url = `https://pb.nxh.ch/f/${file.file_id}`;
+      const url = `${normalizedBaseUrl}/f/${encodeFileIdForUrl(file.file_id)}`;
       const groupId = file.group_id || (file.file_id?.split('/')?.[0] ?? file.file_id);
 
       const fileInfo: any = {

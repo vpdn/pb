@@ -13,6 +13,7 @@ export interface Env {
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
+    const normalizedBaseUrl = url.hostname.includes('workers.dev') ? 'https://pb.nxh.ch' : url.origin;
     
     // CORS headers
     const corsHeaders = {
@@ -35,7 +36,7 @@ export default {
 
       // Serve files (GET)
       if (request.method === 'GET') {
-        return handleServe(fileId, env.DB, env.R2_BUCKET);
+        return handleServe(fileId, env.DB, env.R2_BUCKET, normalizedBaseUrl);
       }
 
       // Delete files (DELETE)
@@ -89,8 +90,7 @@ export default {
       }
 
       // Use custom domain if available, otherwise use request origin
-      const baseUrl = url.hostname.includes('workers.dev') ? 'https://pb.nxh.ch' : url.origin;
-      return handleUpload(request, env.DB, env.R2_BUCKET, validKey, baseUrl);
+      return handleUpload(request, env.DB, env.R2_BUCKET, validKey, normalizedBaseUrl);
     }
 
     // Handle list files
@@ -113,7 +113,7 @@ export default {
         });
       }
 
-      return handleList(env.DB, validKey);
+      return handleList(env.DB, validKey, normalizedBaseUrl);
     }
 
     // Default response

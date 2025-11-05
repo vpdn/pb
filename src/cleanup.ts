@@ -13,7 +13,7 @@ export async function cleanupExpiredFiles(
       SELECT file_id, original_name 
       FROM uploads 
       WHERE expires_at IS NOT NULL 
-        AND expires_at < datetime('now')
+        AND datetime(expires_at) <= datetime('now')
       LIMIT ?
     `).bind(batchSize).all();
 

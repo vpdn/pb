@@ -77,7 +77,7 @@ describe('Main Worker', () => {
 
       const response = await worker.fetch(request, env as any, ctx);
 
-      expect(handleServe).toHaveBeenCalledWith('test123', env.DB, env.R2_BUCKET);
+      expect(handleServe).toHaveBeenCalledWith('test123', env.DB, env.R2_BUCKET, 'https://example.com');
       expect(response).toBe(mockResponse);
     });
 
@@ -244,7 +244,7 @@ describe('Main Worker', () => {
       const response = await worker.fetch(request, env as any, ctx);
 
       expect(validateApiKey).toHaveBeenCalledWith(env.DB, 'pb_test123');
-      expect(handleList).toHaveBeenCalledWith(env.DB, mockApiKey);
+      expect(handleList).toHaveBeenCalledWith(env.DB, mockApiKey, 'https://example.com');
       expect(response).toBe(mockListResponse);
     });
 
@@ -432,7 +432,7 @@ describe('Main Worker', () => {
 
       const response = await worker.fetch(request, env as any, ctx);
 
-      expect(handleServe).toHaveBeenCalledWith('test123', env.DB, env.R2_BUCKET);
+      expect(handleServe).toHaveBeenCalledWith('test123', env.DB, env.R2_BUCKET, 'https://example.com');
     });
 
     it('should preserve protocol in upload responses', async () => {
