@@ -2,7 +2,7 @@ export async function handleList(db: D1Database, apiKey: { id: number; key: stri
   try {
     // Query uploads table for files uploaded by this API key
     const result = await db.prepare(`
-      SELECT 
+      SELECT
         file_id,
         group_id,
         original_name,
@@ -10,9 +10,11 @@ export async function handleList(db: D1Database, apiKey: { id: number; key: stri
         size,
         content_type,
         uploaded_at,
+        last_accessed_at,
+        access_count,
         expires_at
-      FROM uploads 
-      WHERE api_key_id = ? 
+      FROM uploads
+      WHERE api_key_id = ?
       ORDER BY uploaded_at DESC
     `).bind(apiKey.id).all();
 
@@ -35,6 +37,8 @@ export async function handleList(db: D1Database, apiKey: { id: number; key: stri
         size: file.size,
         contentType: file.content_type,
         uploadedAt: file.uploaded_at,
+        lastAccessedAt: file.last_accessed_at,
+        accessCount: file.access_count || 0,
         url
       };
 

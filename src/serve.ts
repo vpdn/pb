@@ -48,7 +48,7 @@ export async function handleServe(
     if (!upload) {
       return new Response('File not found', { status: 404 });
     }
-    
+
     // Check if file has expired
     if (upload.expires_at) {
       const expirationDate = new Date(upload.expires_at);
@@ -58,10 +58,16 @@ export async function handleServe(
     }
 
     const object = await bucket.get(fileId);
-    
+
     if (!object) {
       return new Response('File not found in storage', { status: 404 });
     }
+
+    // Update last_accessed_at timestamp and increment access counter atomically
+    // Using access_count = access_count + 1 ensures atomic increment (no race condition)
+    await db.prepare(
+      'UPDATE uploads SET last_accessed_at = CURRENT_TIMESTAMP, access_count = access_count + 1 WHERE file_id = ?'
+    ).bind(fileId).run();
 
     const headers = new Headers();
     const contentType = upload.content_type || 'application/octet-stream';

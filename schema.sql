@@ -17,6 +17,8 @@ CREATE TABLE IF NOT EXISTS uploads (
   content_type TEXT,
   api_key_id INTEGER NOT NULL,
   uploaded_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  last_accessed_at DATETIME DEFAULT NULL,
+  access_count INTEGER DEFAULT 0,
   expires_at DATETIME DEFAULT NULL,
   FOREIGN KEY (api_key_id) REFERENCES api_keys(id)
 );
